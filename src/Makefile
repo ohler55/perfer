@@ -1,5 +1,5 @@
-CC=cc
 CV=$(shell if [ `uname` = "Darwin" ]; then echo "c11"; elif [ `uname` = "Linux" ]; then echo "gnu11"; fi;)
+CC=$(shell if [ `uname` = "Darwin" ]; then echo "cc"; elif [ `uname` = "Linux" ]; then echo "gcc-6"; fi;)
 CFLAGS=-c -Wall -O3 -std=$(CV) -pedantic
 
 SRC_DIR=.
