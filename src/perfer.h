@@ -21,6 +21,7 @@ typedef struct _Perfer {
     const char		*req_file;
     char		*req_body;
     int			req_len;
+    int			backlog;
     bool		keep_alive;
     bool		verbose;
     bool		replace;

@@ -31,9 +31,8 @@ extern void	drop_init(Drop d, struct _Perfer *h);
 extern void	drop_cleanup(Drop d);
 extern int	drop_pending(Drop d);
 
-extern void	drop_connect(Drop d, struct _Pool *p, struct addrinfo *res);
-
-extern void	drop_send(Drop d, struct _Pool *p);
-extern void	drop_recv(Drop d, struct _Pool *p, bool enough);
+extern int	drop_connect(Drop d, struct _Pool *p, struct addrinfo *res);
+extern bool	drop_send(Drop d, struct _Pool *p);
+extern bool	drop_recv(Drop d, struct _Pool *p, bool enough);
 
 #endif /* __PERFER_DROP_H__ */

@@ -72,6 +72,7 @@ get_addr_info(const char *addr) {
 	return NULL;
     } else {
 	strncpy(host, addr, port - addr);
+	host[port - addr] = '\0';
 	port++;
 	if (0 != (err = getaddrinfo(host, port, &hints, &res))) {
 	    printf("*-*-* Failed to resolve %s. %s\n", addr, gai_strerror(err));
@@ -112,6 +113,7 @@ loop(void *x) {
     }
     end_time = h->start_time + h->duration;
     p->actual_end = end_time;
+LOOP:
     while (!h->done) {
 	now = dtime();
 	if (0 < p->num) {
@@ -125,18 +127,18 @@ loop(void *x) {
 	// pollfd.
 	for (d = p->drops, i = pcnt, pp = ps; 0 < i; i--, d++) {
 	    if (0 == d->sock && !enough) {
-		drop_connect(d, p, res);
+		if (drop_connect(d, p, res)) {
+		    // Failed to connect. Abort the test.
+		    perfer_stop(h);
+		    goto LOOP;
+		}
 	    }
 	    if (0 < d->sock) {
 		pp->fd = d->sock;
 		d->pp = pp;
 		pending = drop_pending(d);
-		if (p->max_pending < pending) {
-		    p->max_pending = pending;
-		    printf("*** max %d\n", pending);
-		}
 		if (0 < pending) {
-		    pp->events = POLLERR | POLLIN;
+		    pp->events = POLLERR | POLLIN | POLLOUT;
 		} else if (!enough) {
 		    pp->events = POLLERR | POLLOUT;
 		}
@@ -147,7 +149,7 @@ loop(void *x) {
 	if (pp == ps) {
 	    break;
 	}
-	if (0 > (i = poll(ps, pp - ps, 1000))) {
+	if (0 > (i = poll(ps, pp - ps, 10))) {
 	    if (EAGAIN == errno) {
 		continue;
 	    }
@@ -162,18 +164,22 @@ loop(void *x) {
 		continue;
 	    }
 	    if (0 != (d->pp->revents & POLLIN)) {
-		drop_recv(d, p, enough);
-	    } else if (!enough && 0 != (d->pp->revents & POLLOUT)) {
-		drop_send(d, p);
-		//drop_send(d, p); // TBD
-	    } else if (0 != (d->pp->revents & POLLERR)) {
+		if (drop_recv(d, p, enough)) {
+		    continue;
+		}
+	    }
+	    if (!enough && 0 != (d->pp->revents & POLLOUT)) {
+		if (drop_send(d, p)) {
+		    continue;
+		}
+	    }
+	    if (0 != (d->pp->revents & POLLERR)) {
 		p->err_cnt++;
 		drop_cleanup(d);
 	    }
 	}
     }
     p->actual_end = dtime();
-
     int	cnt = 0;
     for (d = p->drops, i = pcnt; 0 < i; i--, d++) {
 	if (0 < d->sock) {

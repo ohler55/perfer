@@ -17,7 +17,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.0.1"
+#define VERSION	"1.1.0"
 
 static struct _Perfer	perfer = {
     .inited = false,
@@ -34,6 +34,7 @@ static struct _Perfer	perfer = {
     .req_file = NULL,
     .req_body = NULL,
     .req_len = 0,
+    .backlog = PIPELINE_SIZE - 1,
     .keep_alive = false,
     .verbose = false,
     .replace = false,
@@ -64,6 +65,9 @@ static const char	*help_lines[] = {
     "",
     "  -c <number>             Number of connection to use for sending requests",
     "  --connections <number>  for each thread (default: 1)",
+    "",
+    "  -b <number>             Maximum backlog for pipeline on a connection.",
+    "  --backlog <number>      (default: 15)",
     "",
     "  -p <path>               URL path of the HTTP request. (default: /)",
     "  --path <path>",
@@ -183,6 +187,23 @@ perfer_init(Perfer h, int argc, const char **argv) {
 	    h->ccnt = strtol(opt_val, &end, 10);
 	    if ('\0' != *end || 1 > h->ccnt) {
 		printf("'%s' is not a valid connection number.\n", opt_val);
+		help(app_name);
+		return -1;
+	    }
+	    continue;
+	    break;
+	default: // match but something went wrong
+	    help(app_name);
+	    return -1;
+	}
+	switch (cnt = arg_match(argc, argv, &opt_val, "b", "-backlog")) {
+	case 0: // no match
+	    break;
+	case 1:
+	case 2:
+	    h->backlog = strtol(opt_val, &end, 10);
+	    if ('\0' != *end || 1 > h->ccnt || PIPELINE_SIZE <= h->backlog) {
+		printf("'%s' is not a valid backlog number.\n", opt_val);
 		help(app_name);
 		return -1;
 	    }

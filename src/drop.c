@@ -49,7 +49,8 @@ drop_pending(Drop d) {
     return len;
 }
 
-void
+// Return non-zero on error.
+int
 drop_connect(Drop d, Pool p, struct addrinfo *res) {
     int	optval = 1;
 
@@ -60,16 +61,18 @@ drop_connect(Drop d, Pool p, struct addrinfo *res) {
 	p->err_cnt++;
 	p->finished = true;
 	p->actual_end = dtime();
-    } else {
-	fcntl(d->sock, F_SETFL, O_NONBLOCK);
-	d->rcnt = 0;
+	return errno;
     }
+    fcntl(d->sock, F_SETFL, O_NONBLOCK);
+    d->rcnt = 0;
+
+    return 0;
 }
 
-void
+bool
 drop_send(Drop d, Pool p) {
-    if (PIPELINE_SIZE - 1 <= drop_pending(d)) {
-	return;
+    if (d->h->backlog <= drop_pending(d)) {
+	return false;
     }
     struct _Perfer	*perf = d->h;
     int			scnt;
@@ -100,37 +103,36 @@ drop_send(Drop d, Pool p) {
 	printf("*-*-* error sending request: %s\n", strerror(errno));
 	p->err_cnt++;
 	drop_cleanup(d);
-    } else {
-	p->sent_cnt++;
-	d->pipeline[d->ptail] = dtime();
-	d->ptail++;
-	if (PIPELINE_SIZE <= d->ptail) {
-	    d->ptail = 0;
-	}
+	return true;
     }
+    p->sent_cnt++;
+    d->pipeline[d->ptail] = dtime();
+    d->ptail++;
+    if (PIPELINE_SIZE <= d->ptail) {
+	d->ptail = 0;
+    }
+    return false;
 }
 
-void
+bool
 drop_recv(Drop d, Pool p, bool enough) {
     ssize_t	rcnt;
 
     if (0 > (rcnt = recv(d->sock, d->buf + d->rcnt, sizeof(d->buf) - d->rcnt - 1, 0))) {
 	printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
 	drop_cleanup(d);
-	return;
+	return true;
     }
     d->rcnt += rcnt;
     d->buf[d->rcnt] = '\0';
 
-
-    // TBD loop until all processed
-    while (true) {
+    while (0 < d->rcnt) {
 	if (0 >= d->xsize) {
 	    char	*hend = strstr(d->buf, "\r\n\r\n");
 	    char	*cl = strstr(d->buf, content_length);
 
 	    if (NULL == hend) {
-		return;
+		return false;
 	    }
 	    if (NULL == cl) {
 		d->xsize = hend - d->buf + 4;
@@ -144,7 +146,7 @@ drop_recv(Drop d, Pool p, bool enough) {
 		if ('\r' != *end) {
 		    printf("*-*-* error reading content length on %d.\n", d->sock);
 		    drop_cleanup(d);
-		    return;
+		    return true;
 		}
 		d->xsize = hend - d->buf + 4 + len;
 	    }
@@ -152,7 +154,7 @@ drop_recv(Drop d, Pool p, bool enough) {
 		break;
 	    }
 	}
-	if (d->rcnt <= d->xsize) {
+	if (d->xsize <= d->rcnt) {
 	    double	dt = dtime() - d->pipeline[d->phead];
 	
 	    p->ok_cnt++;
@@ -173,8 +175,9 @@ drop_recv(Drop d, Pool p, bool enough) {
 	    }
 	    if (enough || !d->h->keep_alive) {
 		drop_cleanup(d);
+		return true;
 	    } else {
-		if ( d->xsize < d->rcnt) {
+		if (d->xsize < d->rcnt) {
 		    memmove(d->buf, d->buf + d->xsize, d->rcnt - d->xsize);
 		    d->rcnt -= d->xsize;
 		} else {
@@ -185,4 +188,5 @@ drop_recv(Drop d, Pool p, bool enough) {
 	    }
 	}
     }
+    return false;
 }
