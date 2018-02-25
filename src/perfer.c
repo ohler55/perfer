@@ -17,7 +17,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.1.0"
+#define VERSION	"1.1.1"
 
 static struct _Perfer	perfer = {
     .inited = false,

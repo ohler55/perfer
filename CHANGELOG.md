@@ -1,5 +1,9 @@
 # CHANGELOG
 
+### 1.1.1 - 2018-02-25
+
+Fixed segfault on exit.
+
 ### 1.1.0 - 2018-02-25
 
 Pipeline backlog option added.
