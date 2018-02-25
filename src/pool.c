@@ -23,6 +23,7 @@ pool_init(Pool p, struct _Perfer *h, long num) {
     p->perfer = h;
     p->num = num;
     p->dcnt = h->ccnt;
+    p->max_pending = 0;
     p->sent_cnt = 0;
     p->err_cnt = 0;
     p->ok_cnt = 0;
@@ -34,12 +35,9 @@ pool_init(Pool p, struct _Perfer *h, long num) {
     }
     Drop	d;
     int		i;
-    int		err;
 
     for (d = p->drops, i = p->dcnt; 0 < i; i--, d++) {
-	if (0 != (err = drop_init(d, h))) {
-	    return err;
-	}
+	drop_init(d, h);
     }
     return 0;
 }
@@ -99,75 +97,12 @@ loop(void *x) {
     struct addrinfo	*res = get_addr_info(h->addr);
     double		end_time;
     double		now;
-    double		dt;
     bool		enough = false;
-    ssize_t		rcnt;
-    ssize_t		xsize = 0; // expected size of response/page
-    int			sock;
-    int			optval = 1;
-    char		target[16384];
-    char		buf[16384];
-    int			sent_cnt;
-
+    int			pending;
+    
     if (NULL == res) {
 	perfer_stop(h);
 	return NULL;
-    }
-    // Preload the page to check the expected size. This should be a blocking
-    // connection and recv.
-    if (0 > (sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol))) {
-	printf("*-*-* error creating socket: %s\n", strerror(errno));
-	p->finished = true;
-	return NULL;
-    }
-    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
-
-    if (0 > connect(sock, res->ai_addr, res->ai_addrlen)) {
-	printf("*-*-* error connecting socket: %s\n", strerror(errno));
-	close(sock);
-	p->finished = true;
-	return NULL;
-    }
-    if (h->replace) {
-	char	body[16384];
-	char	seq_buf[16];
-	char	*s = h->req_body;
-	int	prev = 0;
-	int	off = 0;
-	int	seq = atomic_fetch_add(&h->seq, 1);
-
-	snprintf(seq_buf, sizeof(seq_buf), "%011d", seq);
-	while (NULL != (s = strstr(h->req_body + prev, "${sequence}"))) {
-	    off = s - h->req_body;
-	    memcpy(body + prev, h->req_body + prev, off - prev);
-	    memcpy(body + off, seq_buf, 11);
-	    off += 11;
-	    prev = off;
-	}
-	strcpy(body + prev, h->req_body + prev);
-	sent_cnt = send(sock, body, h->req_len, 0);
-    } else {
-	sent_cnt = send(sock, h->req_body, h->req_len, 0);
-    }
-    if (h->req_len != sent_cnt) {
-	printf("*-*-* error sending request: %s\n", strerror(errno));
-	close(sock);
-	p->finished = true;
-	return NULL;
-    }
-    while (0 < (rcnt = recv(sock, target, sizeof(target) - 1, 0))) {
-	xsize += rcnt;
-	break; // TBD only needed for keep-alive in theory and then could fail for longer replies.
-    }
-    if (0 >= xsize) {
-	printf("*-*-* failed to GET %s from %s.\n", h->path, h->addr);
-	p->finished = true;
-	return NULL;
-    }
-    target[xsize] = '\0';
-    close(sock);
-    if (h->verbose) {
-	printf("response: '%s'\n", target);
     }
     if (h->tcnt - 1 == atomic_fetch_add(&h->ready_cnt, 1)) {
 	h->start_time = dtime();
@@ -190,28 +125,17 @@ loop(void *x) {
 	// pollfd.
 	for (d = p->drops, i = pcnt, pp = ps; 0 < i; i--, d++) {
 	    if (0 == d->sock && !enough) {
-		if (0 > (d->sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) ||
-		    0 > setsockopt(d->sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval)) ||
-		    0 > connect(d->sock, res->ai_addr, res->ai_addrlen)) {
-		    printf("*-*-* error opening socket: %s\n", strerror(errno));
-		    p->err_cnt++;
-		    p->finished = true;
-		    p->actual_end = dtime();
-		    return NULL;
-		}
-		fcntl(d->sock, F_SETFL, O_NONBLOCK);
-		d->sent = false;
-		d->rcnt = 0;
-		// A connection is established but the socket may not be
-		// writable for a while so start latency timing when the socket
-		// can be sent on.
+		drop_connect(d, p, res);
 	    }
 	    if (0 < d->sock) {
 		pp->fd = d->sock;
 		d->pp = pp;
-		// Errors will show up on read and write so don't bother
-		// checking in the poll.
-		if (d->sent) {
+		pending = drop_pending(d);
+		if (p->max_pending < pending) {
+		    p->max_pending = pending;
+		    printf("*** max %d\n", pending);
+		}
+		if (0 < pending) {
 		    pp->events = POLLERR | POLLIN;
 		} else if (!enough) {
 		    pp->events = POLLERR | POLLOUT;
@@ -223,7 +147,7 @@ loop(void *x) {
 	if (pp == ps) {
 	    break;
 	}
-	if (0 > (i = poll(ps, pp - ps, 10))) {
+	if (0 > (i = poll(ps, pp - ps, 1000))) {
 	    if (EAGAIN == errno) {
 		continue;
 	    }
@@ -233,81 +157,15 @@ loop(void *x) {
 	if (0 == i) {
 	    continue;
 	}
-	now = dtime();
 	for (d = p->drops, i = pcnt; 0 < i; i--, d++) {
 	    if (NULL == d->pp || 0 == d->pp->revents || 0 == d->sock) {
 		continue;
 	    }
 	    if (0 != (d->pp->revents & POLLIN)) {
-		if (0 > (rcnt = recv(d->sock, buf + d->rcnt, xsize - d->rcnt, 0))) {
-		    printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
-		    drop_cleanup(d);
-		    continue;
-		}
-		d->rcnt += rcnt;
-		if (0 == rcnt || xsize <= d->rcnt) {
-		    p->ok_cnt++;
-		    dt = now - d->start;
-		    p->lat_sum += dt;
-		    /* TBD debugging, uses something better than a simple average for latency analysis.
-		    if (0.01 < dt && p->lat_sum * 2.0 / p->ok_cnt < dt) {
-			printf("*** long latency: %0.3f msecs\n", dt * 1000.0);
-		    }
-		    */
-		    if (h->verbose) {
-			buf[d->rcnt] = '\0';
-			if (0 != strncmp(target, buf, xsize)) {
-			    buf[xsize] = '\0';
-			    printf("*-*-* response mismatch \n%s\n", buf);
-			    p->err_cnt++;
-			    drop_cleanup(d);
-			    continue;
-			}
-		    }
-		    if (enough || !h->keep_alive) {
-			drop_cleanup(d);
-		    } else {
-			int	ds = d->sock;
-
-			drop_init(d, h);
-			d->sock = ds;
-			d->start = now;
-		    }
-		}
+		drop_recv(d, p, enough);
 	    } else if (!enough && 0 != (d->pp->revents & POLLOUT)) {
-		if (!d->sent) { // not really needed
-		    // TBD allow partial sends by checking return
-		    if (h->replace) {
-			char	body[16384];
-			char	seq_buf[16];
-			char	*s = h->req_body;
-			int	prev = 0;
-			int	off = 0;
-			int	seq = atomic_fetch_add(&h->seq, 1);
-
-			snprintf(seq_buf, sizeof(seq_buf), "%011d", seq);
-			while (NULL != (s = strstr(h->req_body + prev, "${sequence}"))) {
-			    off = s - h->req_body;
-			    memcpy(body + prev, h->req_body + prev, off - prev);
-			    memcpy(body + off, seq_buf, 11);
-			    off += 11;
-			    prev = off;
-			}
-			strcpy(body + prev, h->req_body + prev);
-			sent_cnt = send(d->sock, body, h->req_len, 0);
-		    } else {
-			sent_cnt = send(d->sock, h->req_body, h->req_len, 0);
-		    }
-		    if (h->req_len != sent_cnt) {
-			printf("*-*-* error sending request: %s\n", strerror(errno));
-			p->err_cnt++;
-			drop_cleanup(d);
-			continue;
-		    }
-		    d->sent = true;
-		    p->sent_cnt++;
-		    d->start = now;
-		}
+		drop_send(d, p);
+		//drop_send(d, p); // TBD
 	    } else if (0 != (d->pp->revents & POLLERR)) {
 		p->err_cnt++;
 		drop_cleanup(d);

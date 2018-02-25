@@ -17,7 +17,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.0"
+#define VERSION	"1.0.1"
 
 static struct _Perfer	perfer = {
     .inited = false,
@@ -331,6 +331,8 @@ perfer_start(Perfer h) {
     long	err_cnt = 0;
     double	lat_sum = 0.0;
     double	psum = 0.0;
+    double	lat = 0.0;
+    double	rate = 0.0;
     
     for (p = h->pools, i = h->tcnt; 0 < i; i--, p++) {
 	if (0 != (err = pool_start(p))) {
@@ -353,9 +355,15 @@ perfer_start(Perfer h) {
     if (ok_cnt + err_cnt < sent_cnt) {
 	printf("%s did not respond to %ld requests.\n", h->addr, sent_cnt - ok_cnt - err_cnt);
     }
+    if (0.0 < psum) {
+	rate = (double)ok_cnt / (psum / h->tcnt);
+    }
+    if (0 < ok_cnt) {
+	lat = lat_sum * 1000.0 / ok_cnt;
+    }
     printf("%s processed %ld requests in %0.3f seconds for a rate of %ld Requests/sec.\n",
-	   h->addr, ok_cnt, psum / h->tcnt, (long)((double)ok_cnt / (psum / h->tcnt)));
-    printf("with an average latency of %0.3f msecs\n", lat_sum * 1000.0 / ok_cnt);
+	   h->addr, ok_cnt, psum / h->tcnt, (long)rate);
+    printf("with an average latency of %0.3f msecs\n", lat);
 
     return 0;
 }

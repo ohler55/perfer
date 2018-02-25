@@ -11,6 +11,7 @@ struct _Perfer;
 typedef struct _Pool {
     struct _Drop	*drops;
     int			dcnt;
+    int			max_pending;
     long		num;
     long		sent_cnt;
     long		err_cnt;

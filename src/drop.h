@@ -6,18 +6,34 @@
 #include <stdbool.h>
 #include <poll.h>
 
+#define MAX_RESP_SIZE	16384
+#define PIPELINE_SIZE	16
+
 struct _Perfer;
+struct _Pool;
+struct addrinfo;
 
 typedef struct _Drop {
     struct _Perfer	*h; // for addr and request body
     int			sock;
     struct pollfd	*pp;
-    bool		sent;
-    long		rcnt; // recv count
-    double		start;
+
+    double		pipeline[PIPELINE_SIZE];
+    int			phead;
+    int			ptail;
+
+    long		rcnt;    // recv count
+    long		xsize;   // expected size of message
+    char		buf[MAX_RESP_SIZE];
 } *Drop;
 
-extern int	drop_init(Drop d, struct _Perfer *h);
+extern void	drop_init(Drop d, struct _Perfer *h);
 extern void	drop_cleanup(Drop d);
+extern int	drop_pending(Drop d);
+
+extern void	drop_connect(Drop d, struct _Pool *p, struct addrinfo *res);
+
+extern void	drop_send(Drop d, struct _Pool *p);
+extern void	drop_recv(Drop d, struct _Pool *p, bool enough);
 
 #endif /* __PERFER_DROP_H__ */
