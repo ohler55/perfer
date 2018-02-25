@@ -44,13 +44,16 @@ pool_init(Pool p, struct _Perfer *h, long num) {
 
 void
 pool_cleanup(Pool p) {
+/*
     Drop	d;
     int		i;
 
+    pthread_join(p->thread, NULL);
     for (d = p->drops, i = p->dcnt; 0 < i; i--, d++) {
 	drop_cleanup(d);
     }
     free(p->drops);
+*/
 }
 
 // Returns addrinfo for a host[:port] string with the default port of 80.
