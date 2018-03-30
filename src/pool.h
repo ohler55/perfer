@@ -17,6 +17,7 @@ typedef struct _Pool {
     long		err_cnt;
     long		ok_cnt;
     double		lat_sum;
+    double		lat_sq_sum;
     double		actual_end;
     struct _Perfer	*perfer;
     pthread_t		thread;

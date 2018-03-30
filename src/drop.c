@@ -156,7 +156,9 @@ drop_recv(Drop d, Pool p, bool enough) {
 	}
 	if (d->xsize <= d->rcnt) {
 	    double	dt = dtime() - d->pipeline[d->phead];
-	
+	    double	ave;
+	    double	dif;
+	    
 	    p->ok_cnt++;
 	    d->pipeline[d->phead] = 0.0;
 	    d->phead++;
@@ -164,6 +166,15 @@ drop_recv(Drop d, Pool p, bool enough) {
 		d->phead = 0;
 	    }
 	    p->lat_sum += dt;
+	    ave = p->lat_sum / (double)p->ok_cnt;
+	    dif = dt - ave;
+	    p->lat_sq_sum += dif * dif;
+
+
+	    // TBD sum of (diff from on going average) squared
+	    // sq_sum
+	    
+
 	    /* TBD debugging, uses something better than a simple average for latency analysis.
 	       if (0.01 < dt && p->lat_sum * 2.0 / p->ok_cnt < dt) {
 	       printf("*** long latency: %0.3f msecs\n", dt * 1000.0);
@@ -173,7 +184,7 @@ drop_recv(Drop d, Pool p, bool enough) {
 		d->buf[d->xsize] = '\0';
 		printf("%s\n", d->buf);
 	    }
-	    if (enough || !d->h->keep_alive) {
+	    if ((enough || !d->h->keep_alive) && 0 >= drop_pending(d) ) {
 		drop_cleanup(d);
 		return true;
 	    } else {

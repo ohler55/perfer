@@ -28,6 +28,7 @@ pool_init(Pool p, struct _Perfer *h, long num) {
     p->err_cnt = 0;
     p->ok_cnt = 0;
     p->lat_sum = 0.0;
+    p->lat_sq_sum = 0.0;
     p->actual_end = 0.0;
     if (NULL == (p->drops = (Drop)malloc(sizeof(struct _Drop) * p->dcnt))) {
 	printf("-*-*- Failed to allocate %d connections.\n", p->dcnt);

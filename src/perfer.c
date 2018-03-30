@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +18,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.1.1"
+#define VERSION	"1.2.0"
 
 static struct _Perfer	perfer = {
     .inited = false,
@@ -304,7 +305,10 @@ perfer_init(Perfer h, int argc, const char **argv) {
     int		i;
     int		err;
     long	n = num / h->tcnt;
-    
+
+    if (!h->keep_alive) {
+	h->backlog = 1;
+    }
     for (p = h->pools, i = h->tcnt; 0 < i; i--, p++) {
 	if (0 != (err = pool_init(p, h, n))) {
 	    return err;
@@ -354,6 +358,7 @@ perfer_start(Perfer h) {
     double	psum = 0.0;
     double	lat = 0.0;
     double	rate = 0.0;
+    double	stdev = 0.0;
     
     for (p = h->pools, i = h->tcnt; 0 < i; i--, p++) {
 	if (0 != (err = pool_start(p))) {
@@ -368,6 +373,7 @@ perfer_start(Perfer h) {
 	err_cnt += p->err_cnt;
 	lat_sum += p->lat_sum;
 	psum += p->actual_end - h->start_time;
+	stdev += p->lat_sq_sum;
     }
     // TBD actual times for each thread
     if (0 < err_cnt) {
@@ -381,11 +387,19 @@ perfer_start(Perfer h) {
     }
     if (0 < ok_cnt) {
 	lat = lat_sum * 1000.0 / ok_cnt;
+	stdev /= (double)ok_cnt;
+	stdev = sqrt(stdev) * 1000.0;
     }
-    printf("%s processed %ld requests in %0.3f seconds for a rate of %ld Requests/sec.\n",
-	   h->addr, ok_cnt, psum / h->tcnt, (long)rate);
-    printf("with an average latency of %0.3f msecs\n", lat);
-
+    printf("Benchmarks for:\n");
+    printf("  URL:                %s/%s\n", h->addr, h->path);
+    printf("  Threads:            %ld\n", h->tcnt);
+    printf("  Connections/thread: %ld\n", h->ccnt);
+    printf("  Duration:           %0.1f seconds\n", psum / h->tcnt);
+    printf("  Keep-Alive:         %s\n", h->keep_alive ? "true" : "false");
+    printf("Results:\n");
+    printf("  Throughput:         %ld requests/second\n", (long)rate);
+    printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", lat, stdev);
+    
     return 0;
 }
 

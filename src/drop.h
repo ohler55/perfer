@@ -21,7 +21,7 @@ typedef struct _Drop {
     double		pipeline[PIPELINE_SIZE];
     int			phead;
     int			ptail;
-
+    
     long		rcnt;    // recv count
     long		xsize;   // expected size of message
     char		buf[MAX_RESP_SIZE];
