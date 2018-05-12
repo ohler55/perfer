@@ -17,6 +17,7 @@
 #include "drop.h"
 
 static const char	content_length[] = "Content-Length:";
+static const char	transfer_encoding[] = "Transfer-Encoding:";
 
 void
 drop_init(Drop d, struct _Perfer *h) {
@@ -135,7 +136,15 @@ drop_recv(Drop d, Pool p, bool enough) {
 		return false;
 	    }
 	    if (NULL == cl) {
-		d->xsize = hend - d->buf + 4;
+		char	*te = strstr(d->buf, transfer_encoding);
+
+		// TBD Handle chunking correctly. This approach only works
+		// when all the chunks come in one read and no more than that.
+		if (NULL != te && 0 == strncasecmp("chunked\r", te + sizeof(transfer_encoding), 8)) {
+		    d->xsize = d->rcnt;
+		} else {
+		    d->xsize = hend - d->buf + 4;
+		}
 	    } else {
 		cl += sizeof(content_length);
 		for (; ' ' == *cl; cl++) {
@@ -158,7 +167,7 @@ drop_recv(Drop d, Pool p, bool enough) {
 	    double	dt = dtime() - d->pipeline[d->phead];
 	    double	ave;
 	    double	dif;
-	    
+
 	    p->ok_cnt++;
 	    d->pipeline[d->phead] = 0.0;
 	    d->phead++;
@@ -166,10 +175,11 @@ drop_recv(Drop d, Pool p, bool enough) {
 		d->phead = 0;
 	    }
 	    p->lat_sum += dt;
-	    ave = p->lat_sum / (double)p->ok_cnt;
-	    dif = dt - ave;
-	    p->lat_sq_sum += dif * dif;
-
+	    if (0 < p->ok_cnt) {
+		ave = p->lat_sum / (double)p->ok_cnt;
+		dif = dt - ave;
+		p->lat_sq_sum += dif * dif;
+	    }
 	    /* TBD debugging, uses something better than a simple average for latency analysis.
 	       if (0.01 < dt && p->lat_sum * 2.0 / p->ok_cnt < dt) {
 	       printf("*** long latency: %0.3f msecs\n", dt * 1000.0);

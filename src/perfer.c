@@ -440,6 +440,9 @@ perfer_start(Perfer p) {
     printf("  Duration:           %0.1f seconds\n", psum / p->tcnt);
     printf("  Keep-Alive:         %s\n", p->keep_alive ? "true" : "false");
     printf("Results:\n");
+    if (0 < err_cnt) {
+	printf("  Failures:           %ld\n", err_cnt);
+    }
     printf("  Throughput:         %ld requests/second\n", (long)rate);
     printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", lat, stdev);
     
