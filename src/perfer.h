@@ -8,6 +8,11 @@
 
 struct _Pool;
 
+typedef struct _Header {
+    struct _Header	*next;
+    const char		*line;
+} *Header;
+
 typedef struct _Perfer {
     bool		inited;
     volatile bool	done;
@@ -27,6 +32,7 @@ typedef struct _Perfer {
     bool		replace;
     atomic_int		ready_cnt;
     atomic_int		seq;
+    Header		headers;
 } *Perfer;
 
 extern void	perfer_stop(Perfer h);

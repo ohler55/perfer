@@ -6,7 +6,8 @@
 #include <stdbool.h>
 #include <poll.h>
 
-#define MAX_RESP_SIZE	16384
+//#define MAX_RESP_SIZE	16384
+#define MAX_RESP_SIZE	64000
 #define PIPELINE_SIZE	16
 
 struct _Perfer;

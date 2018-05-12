@@ -170,11 +170,6 @@ drop_recv(Drop d, Pool p, bool enough) {
 	    dif = dt - ave;
 	    p->lat_sq_sum += dif * dif;
 
-
-	    // TBD sum of (diff from on going average) squared
-	    // sq_sum
-	    
-
 	    /* TBD debugging, uses something better than a simple average for latency analysis.
 	       if (0.01 < dt && p->lat_sum * 2.0 / p->ok_cnt < dt) {
 	       printf("*** long latency: %0.3f msecs\n", dt * 1000.0);
@@ -197,6 +192,8 @@ drop_recv(Drop d, Pool p, bool enough) {
 		}
 		d->xsize = 0;
 	    }
+	} else {
+	    break;
 	}
     }
     return false;
