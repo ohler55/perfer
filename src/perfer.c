@@ -129,6 +129,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
     int		cnt;
     long	num = 0;
     
+    pthread_mutex_init(&p->print_mutex, 0);
     argv++;
     argc--;
     for (; 0 < argc; argc -= cnt, argv += cnt) {

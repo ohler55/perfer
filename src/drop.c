@@ -118,6 +118,7 @@ drop_send(Drop d, Pool p) {
 bool
 drop_recv(Drop d, Pool p, bool enough) {
     ssize_t	rcnt;
+    long	hsize = 0;
 
     if (0 > (rcnt = recv(d->sock, d->buf + d->rcnt, sizeof(d->buf) - d->rcnt - 1, 0))) {
 	printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
@@ -125,7 +126,7 @@ drop_recv(Drop d, Pool p, bool enough) {
 	return true;
     }
     d->rcnt += rcnt;
-    d->buf[d->rcnt] = '\0';
+    //d->buf[d->rcnt] = '\0';
 
     while (0 < d->rcnt) {
 	if (0 >= d->xsize) {
@@ -162,6 +163,7 @@ drop_recv(Drop d, Pool p, bool enough) {
 	    if (0 >= d->xsize) {
 		break;
 	    }
+	    hsize = hend - d->buf;
 	}
 	if (d->xsize <= d->rcnt) {
 	    double	dt = dtime() - d->pipeline[d->phead];
@@ -186,8 +188,14 @@ drop_recv(Drop d, Pool p, bool enough) {
 	       }
 	    */
 	    if (d->h->verbose) {
+		char	save = d->buf[d->xsize];
+		
 		d->buf[d->xsize] = '\0';
-		printf("%s\n", d->buf);
+		// TBD mutext here
+		pthread_mutex_lock(&p->perfer->print_mutex);
+		printf("\n%ld %ld %ld --------------------------------------------------------------------------------\n%s\n", d->xsize, d->rcnt, hsize, d->buf);
+		pthread_mutex_unlock(&p->perfer->print_mutex);
+		d->buf[d->xsize] = save;
 	    }
 	    if ((enough || !d->h->keep_alive) && 0 >= drop_pending(d) ) {
 		drop_cleanup(d);
@@ -196,11 +204,12 @@ drop_recv(Drop d, Pool p, bool enough) {
 		if (d->xsize < d->rcnt) {
 		    memmove(d->buf, d->buf + d->xsize, d->rcnt - d->xsize);
 		    d->rcnt -= d->xsize;
+		    d->xsize = 0;
 		} else {
 		    d->rcnt = 0;
+		    d->xsize = 0;
 		    break;
 		}
-		d->xsize = 0;
 	    }
 	} else {
 	    break;
