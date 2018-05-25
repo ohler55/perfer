@@ -3,6 +3,7 @@
 #ifndef __PERFER_PERFER_H__
 #define __PERFER_PERFER_H__
 
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 
@@ -33,6 +34,7 @@ typedef struct _Perfer {
     atomic_int		ready_cnt;
     atomic_int		seq;
     Header		headers;
+    pthread_mutex_t	print_mutex;
 } *Perfer;
 
 extern void	perfer_stop(Perfer h);
