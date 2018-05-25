@@ -16,8 +16,11 @@ matrix:
           sources:
             - ubuntu-toolchain-r-test
           packages:
-            - g++-6
+            - g++-7
       env:
-        - MATRIX_EVAL="CC=gcc-6 && CXX=g++-6"
+        - MATRIX_EVAL="CC=gcc-7 && CXX=g++-7"
+        - sudo mv /usr/bin/gcc /usr/bin/gcc.old
+        - sudo ln -s /usr/bin/gcc-7 /usr/bin/gcc
+        - eval "${MATRIX_EVAL}"
     - os: osx
       compiler: clang
