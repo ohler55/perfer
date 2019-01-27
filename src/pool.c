@@ -18,7 +18,7 @@
 #include "pool.h"
 
 int
-pool_init(Pool p, struct _Perfer *h, long num) {
+pool_init(Pool p, struct _perfer *h, long num) {
     p->finished = false;
     p->perfer = h;
     p->num = num;
@@ -30,7 +30,7 @@ pool_init(Pool p, struct _Perfer *h, long num) {
     p->lat_sum = 0.0;
     p->lat_sq_sum = 0.0;
     p->actual_end = 0.0;
-    if (NULL == (p->drops = (Drop)malloc(sizeof(struct _Drop) * p->dcnt))) {
+    if (NULL == (p->drops = (Drop)malloc(sizeof(struct _drop) * p->dcnt))) {
 	printf("-*-*- Failed to allocate %d connections.\n", p->dcnt);
 	return -1;
     }

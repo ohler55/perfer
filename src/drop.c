@@ -20,8 +20,8 @@ static const char	content_length[] = "Content-Length:";
 static const char	transfer_encoding[] = "Transfer-Encoding:";
 
 void
-drop_init(Drop d, struct _Perfer *h) {
-    memset(d, 0, sizeof(struct _Drop));
+drop_init(Drop d, struct _perfer *h) {
+    memset(d, 0, sizeof(struct _drop));
     d->h = h;
 }
 
@@ -75,7 +75,7 @@ drop_send(Drop d, Pool p) {
     if (d->h->backlog <= drop_pending(d)) {
 	return false;
     }
-    struct _Perfer	*perf = d->h;
+    struct _perfer	*perf = d->h;
     int			scnt;
 
     // TBD allow partial sends by checking return

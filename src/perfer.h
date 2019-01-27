@@ -1,23 +1,23 @@
 // Copyright 2016 by Peter Ohler, All Rights Reserved
 
-#ifndef __PERFER_PERFER_H__
-#define __PERFER_PERFER_H__
+#ifndef PERFER_PERFER_H
+#define PERFER_PERFER_H
 
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 
-struct _Pool;
+struct _pool;
 
-typedef struct _Header {
-    struct _Header	*next;
+typedef struct _header {
+    struct _header	*next;
     const char		*line;
 } *Header;
 
-typedef struct _Perfer {
+typedef struct _perfer {
     bool		inited;
     volatile bool	done;
-    struct _Pool	*pools;
+    struct _pool	*pools;
     long		tcnt;
     long		ccnt;
     const char		*addr;
@@ -39,4 +39,4 @@ typedef struct _Perfer {
 
 extern void	perfer_stop(Perfer h);
 
-#endif /* __PERFER_PERFER_H__ */
+#endif /* PERFER_PERFER_H */

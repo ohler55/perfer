@@ -1,10 +1,10 @@
 // Copyright 2009, 2015, 2018, 2016 by Peter Ohler, All Rights Reserved
 
-#ifndef __PERFER_DTIME_H__
-#define __PERFER_DTIME_H__
+#ifndef PERFER_DTIME_H
+#define PERFER_DTIME_H
 
 extern double	dtime(void);
 extern double	dsleep(double t);
 extern double	dwait(double t);
 
-#endif /* __PERFER_DTIME_H__ */
+#endif /* PERFER_DTIME_H */

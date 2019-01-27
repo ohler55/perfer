@@ -20,7 +20,7 @@ extern int asprintf(char **strp, const char *fmt, ...);
 
 #define VERSION	"1.3.0"
 
-static struct _Perfer	perfer = {
+static struct _perfer	perfer = {
     .inited = false,
     .done = false,
     .pools = NULL,
@@ -283,7 +283,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    break;
 	case 1:
 	case 2: {
-	    Header	h = (Header)malloc(sizeof(struct _Header));
+	    Header	h = (Header)malloc(sizeof(struct _header));
 
 	    h->next = p->headers;
 	    p->headers = h;
@@ -341,7 +341,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	p->replace = (NULL != strstr(p->req_body, "${sequence}"));
     }
     p->inited = true;
-    if (NULL == (p->pools = (Pool)malloc(sizeof(struct _Pool) * p->tcnt))) {
+    if (NULL == (p->pools = (Pool)malloc(sizeof(struct _pool) * p->tcnt))) {
 	printf("-*-*- Failed to allocate %ld threads.\n", p->tcnt);
 	return -1;
     }
