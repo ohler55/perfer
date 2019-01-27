@@ -103,7 +103,10 @@ build_req(Perfer p) {
     for (Header h = p->headers; NULL != h; h = h->next) {
 	size += strlen(h->line) + 2;
     }
-    p->req_body = (char*)malloc(size + 1);
+    if (NULL == (p->req_body = (char*)malloc(size + 1))) {
+	printf("*-*-* Out of memory.\n");
+	exit(-1);
+    }
     p->req_len = size;
     end = p->req_body;
     if (p->keep_alive) {
@@ -129,7 +132,10 @@ perfer_init(Perfer p, int argc, const char **argv) {
     int		cnt;
     long	num = 0;
     
-    pthread_mutex_init(&p->print_mutex, 0);
+    if (0 != pthread_mutex_init(&p->print_mutex, 0)) {
+	printf("%s\n", strerror(errno));
+	return -1;
+    }
     argv++;
     argc--;
     for (; 0 < argc; argc -= cnt, argv += cnt) {
