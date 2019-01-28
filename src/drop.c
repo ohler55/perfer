@@ -101,7 +101,7 @@ drop_send(Drop d, Pool p) {
 	scnt = send(d->sock, perf->req_body, perf->req_len, 0);
     }
     if (perf->req_len != scnt) {
-	printf("*-*-* error sending request: %s\n", strerror(errno));
+	//printf("*-*-* error sending request: %s\n", strerror(errno));
 	p->err_cnt++;
 	drop_cleanup(d);
 	return true;
@@ -121,7 +121,7 @@ drop_recv(Drop d, Pool p, bool enough) {
     long	hsize = 0;
 
     if (0 > (rcnt = recv(d->sock, d->buf + d->rcnt, sizeof(d->buf) - d->rcnt - 1, 0))) {
-	printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
+	//printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
 	drop_cleanup(d);
 	return true;
     }

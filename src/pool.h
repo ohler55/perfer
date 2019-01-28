@@ -13,6 +13,7 @@ typedef struct _pool {
     int			dcnt;
     int			max_pending;
     long		num;
+    long		con_cnt;
     long		sent_cnt;
     long		err_cnt;
     long		ok_cnt;

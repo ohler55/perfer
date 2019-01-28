@@ -35,7 +35,7 @@ static struct _perfer	perfer = {
     .req_file = NULL,
     .req_body = NULL,
     .req_len = 0,
-    .backlog = PIPELINE_SIZE - 1,
+    .backlog = 1, // PIPELINE_SIZE - 1,
     .keep_alive = false,
     .verbose = false,
     .replace = false,
@@ -69,7 +69,7 @@ static const char	*help_lines[] = {
     "  --connections <number>  for each thread (default: 1)",
     "",
     "  -b <number>             Maximum backlog for pipeline on a connection.",
-    "  --backlog <number>      (default: 15)",
+    "  --backlog <number>      (default: 1, range 1 - 15)",
     "",
     "  -p <path>               URL path of the HTTP request. (default: /)",
     "  --path <path>",
@@ -240,7 +240,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	case 1:
 	case 2:
 	    p->backlog = strtol(opt_val, &end, 10);
-	    if ('\0' != *end || 1 > p->ccnt || PIPELINE_SIZE <= p->backlog) {
+	    if ('\0' != *end || 1 > p->backlog || PIPELINE_SIZE <= p->backlog) {
 		printf("'%s' is not a valid backlog number.\n", opt_val);
 		help(app_name);
 		return -1;
@@ -410,6 +410,7 @@ perfer_start(Perfer p) {
     Pool	pool;
     int		i;
     int		err;
+    long	con_cnt = 0;
     long	sent_cnt = 0;
     long	ok_cnt = 0;
     long	err_cnt = 0;
@@ -427,6 +428,7 @@ perfer_start(Perfer p) {
     }
     for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
 	pool_wait(pool);
+	con_cnt += pool->con_cnt;
 	sent_cnt += pool->sent_cnt;
 	ok_cnt += pool->ok_cnt;
 	err_cnt += pool->err_cnt;
@@ -459,6 +461,7 @@ perfer_start(Perfer p) {
     if (0 < err_cnt) {
 	printf("  Failures:           %ld\n", err_cnt);
     }
+    printf("  Connections:        %ld connection established\n", (long)con_cnt);
     printf("  Throughput:         %ld requests/second\n", (long)rate);
     printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", lat, stdev);
     

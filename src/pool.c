@@ -24,6 +24,7 @@ pool_init(Pool p, struct _perfer *h, long num) {
     p->num = num;
     p->dcnt = h->ccnt;
     p->max_pending = 0;
+    p->con_cnt = 0;
     p->sent_cnt = 0;
     p->err_cnt = 0;
     p->ok_cnt = 0;
@@ -136,6 +137,7 @@ LOOP:
 		    perfer_stop(h);
 		    goto LOOP;
 		}
+		p->con_cnt++;
 	    }
 	    if (0 < d->sock) {
 		pp->fd = d->sock;
