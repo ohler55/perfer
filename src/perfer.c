@@ -291,6 +291,10 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	case 2: {
 	    Header	h = (Header)malloc(sizeof(struct _header));
 
+	    if (NULL == h) {
+		printf("*-*-* Out of memory.\n");
+		exit(-1);
+	    }
 	    h->next = p->headers;
 	    p->headers = h;
 	    h->line = opt_val;
@@ -331,8 +335,11 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    printf("-*-*- Failed to open '%s'. %s\n", p->req_file, strerror(errno));
 	    return -1;
 	}
-	fseek(f, 0, SEEK_END);
-	p->req_len = (int)ftell(f);
+	if (0 != fseek(f, 0, SEEK_END) ||
+	    0 > (p->req_len = ftell(f))) {
+	    printf("-*-*- Failed to determine file size for '%s'. %s\n", p->req_file, strerror(errno));
+	    return -1;
+	}
 	rewind(f);
 	if (NULL == (p->req_body = (char*)malloc(p->req_len + 1))) {
 	    printf("-*-*- Failed to allocate memory for request.\n");
@@ -343,7 +350,9 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    return -1;
 	}
 	p->req_body[p->req_len] = '\0';
-	fclose(f);
+	if (0 != fclose(f)) {
+	    printf("-*-*- Failed to close %s. %s. ignoring\n", p->req_file, strerror(errno));
+	}
 	p->replace = (NULL != strstr(p->req_body, "${sequence}"));
     }
     p->inited = true;

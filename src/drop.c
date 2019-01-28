@@ -191,7 +191,6 @@ drop_recv(Drop d, Pool p, bool enough) {
 		char	save = d->buf[d->xsize];
 		
 		d->buf[d->xsize] = '\0';
-		// TBD mutext here
 		pthread_mutex_lock(&p->perfer->print_mutex);
 		printf("\n%ld %ld %ld --------------------------------------------------------------------------------\n%s\n", d->xsize, d->rcnt, hsize, d->buf);
 		pthread_mutex_unlock(&p->perfer->print_mutex);

@@ -26,7 +26,7 @@ typedef struct _perfer {
     double		start_time;
     const char		*req_file;
     char		*req_body;
-    int			req_len;
+    long		req_len;
     int			backlog;
     bool		keep_alive;
     bool		verbose;
