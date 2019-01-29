@@ -336,11 +336,11 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    return -1;
 	}
 	if (0 != fseek(f, 0, SEEK_END) ||
-	    0 > (p->req_len = ftell(f))) {
+	    0 > (p->req_len = ftell(f)) ||
+	    0 != fseek(f, 0, SEEK_SET)) {
 	    printf("-*-*- Failed to determine file size for '%s'. %s\n", p->req_file, strerror(errno));
 	    return -1;
 	}
-	rewind(f);
 	if (NULL == (p->req_body = (char*)malloc(p->req_len + 1))) {
 	    printf("-*-*- Failed to allocate memory for request.\n");
 	    return -1;
