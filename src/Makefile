@@ -7,8 +7,8 @@ ifeq ($(ssl),false)
 	SSL_DEF=
 	SSL_LIB=
 else
-	SSL_DEF=-DWITH_OPENSSL
-	SSL_LIB=-lssl -lcrypto
+	SSL_DEF=$(shell if [ `uname` = "Darwin" ]; then echo ""; elif [ `uname` = "Linux" ]; then echo "-DWITH_OPENSSL"; fi;)
+	SSL_LIB=$(shell if [ `uname` = "Darwin" ]; then echo ""; elif [ `uname` = "Linux" ]; then echo "-lssl -lcrypto"; fi;)
 endif
 
 SRC_DIR=.
