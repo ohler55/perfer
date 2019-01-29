@@ -8,6 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef WITH_OPENSSL
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 #include "arg.h"
 #include "drop.h"
 #include "pool.h"
@@ -18,7 +24,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.3.0"
+#define VERSION	"1.3.1"
 
 static struct _perfer	perfer = {
     .inited = false,
@@ -39,11 +45,15 @@ static struct _perfer	perfer = {
     .keep_alive = false,
     .verbose = false,
     .replace = false,
+    .use_ssl = false,
     .headers = NULL,
 };
 
+// TBD use full URL for ssl (http vs https), server, port, and path
+// TBD update drop to use openssl if perfer.use_ssl
+
 static const char	*help_lines[] = {
-    "saturate a web server with HTTP requests while tracking the number of requests,",
+    "Saturates a web server with HTTP requests while tracking the number of requests,",
     "latency, and throughput. After the duration specified no more requests are sent",
     "and the application terminates when all responses have been received or 10",
     "seconds, which ever is sooner.",
@@ -131,7 +141,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
     char	*end;
     int		cnt;
     long	num = 0;
-    
+
     if (0 != pthread_mutex_init(&p->print_mutex, 0)) {
 	printf("%s\n", strerror(errno));
 	return -1;
@@ -322,7 +332,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
     if (NULL == p->req_file) {
 	if ('/' == *p->path) {
 	    p->path = p->path + 1;
-	}	
+	}
 	build_req(p);
 	if (0 > p->req_len) {
 	    printf("*-*-* Failed to allocate memory for GET request.\n");
@@ -395,7 +405,7 @@ perfer_cleanup(Perfer p) {
 void
 perfer_stop(Perfer p) {
     p->done = true;
-    
+
     Pool	pool;
     int		i;
 
@@ -419,7 +429,7 @@ perfer_start(Perfer p) {
     double	lat = 0.0;
     double	rate = 0.0;
     double	stdev = 0.0;
-    
+
     for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
 	if (0 != (err = pool_start(pool))) {
 	    perfer_stop(p);
@@ -464,7 +474,7 @@ perfer_start(Perfer p) {
     printf("  Connections:        %ld connection established\n", (long)con_cnt);
     printf("  Throughput:         %ld requests/second\n", (long)rate);
     printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", lat, stdev);
-    
+
     return 0;
 }
 
@@ -480,7 +490,7 @@ sig_handler(int sig) {
 int
 main(int argc, const char **argv) {
     int	err;
-    
+
     if (0 != (err = perfer_init(&perfer, argc, argv))) {
 	return err;
     }

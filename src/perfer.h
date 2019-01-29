@@ -31,6 +31,7 @@ typedef struct _perfer {
     bool		keep_alive;
     bool		verbose;
     bool		replace;
+    bool		use_ssl;
     atomic_int		ready_cnt;
     atomic_int		seq;
     Header		headers;
