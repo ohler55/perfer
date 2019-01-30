@@ -1,5 +1,9 @@
 # CHANGELOG
 
+### 1.3.0 - 2019-01-30
+
+Add connection count to output.
+
 ### 1.2.0 - 2018-03-29
 
 Changed results display and added standard deviation for latency.
