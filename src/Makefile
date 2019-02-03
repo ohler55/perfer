@@ -33,7 +33,6 @@ LIBS := -lm -lpthread $(SSL_LIB)
 TARGET := $(BIN_DIR)/perfer
 
 all: $(BIN_DIR) $(TARGET)
-	echo '$(HAS_SSL)'
 
 clean:
 	$(RM) $(OBJS)
