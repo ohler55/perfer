@@ -32,7 +32,9 @@ drop_cleanup(Drop d) {
     }
     d->sock = 0;
     d->pp = NULL;
+#ifdef WITH_OPENSSL
     d->bio = NULL;
+#endif
     memset(d->pipeline, 0, sizeof(d->pipeline));
     d->phead = 0;
     d->ptail = 0;

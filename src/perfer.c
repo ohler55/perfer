@@ -404,11 +404,13 @@ perfer_init(Perfer p, int argc, const char **argv) {
     if (!p->keep_alive) {
 	p->backlog = 1;
     }
+#ifdef WITH_OPENSSL
     if (p->tls) {
 	SSL_load_error_strings();
 	ERR_load_BIO_strings();
 	OpenSSL_add_all_algorithms();
     }
+#endif
     for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
 	if (0 != (err = pool_init(pool, p, n))) {
 	    return err;
