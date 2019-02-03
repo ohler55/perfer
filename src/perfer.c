@@ -31,7 +31,8 @@ static struct _perfer	perfer = {
     .done = false,
     .pools = NULL,
     .addr = NULL,
-    .path = "index.html",
+    .port = NULL,
+    .path = NULL,
     .tcnt = 1,
     .ccnt = 1,
     .duration = 1.0,
@@ -45,12 +46,9 @@ static struct _perfer	perfer = {
     .keep_alive = false,
     .verbose = false,
     .replace = false,
-    .use_ssl = false,
+    .tls = false,
     .headers = NULL,
 };
-
-// TBD use full URL for ssl (http vs https), server, port, and path
-// TBD update drop to use openssl if perfer.use_ssl
 
 static const char	*help_lines[] = {
     "Saturates a web server with HTTP requests while tracking the number of requests,",
@@ -81,9 +79,6 @@ static const char	*help_lines[] = {
     "  -b <number>             Maximum backlog for pipeline on a connection.",
     "  --backlog <number>      (default: 1, range 1 - 15)",
     "",
-    "  -p <path>               URL path of the HTTP request. (default: /)",
-    "  --path <path>",
-    "",
     "  -r <file>               File with the full content of the HTTP request.",
     "  --request <file>        The -keep-alive option is ignored.",
     "",
@@ -93,7 +88,8 @@ static const char	*help_lines[] = {
     "  -a <name: value>        Add an HTTP header field with name and value.",
     "  --add <name: value>",
     "",
-    "  <server-address>        IP address of the server to send requests to.",
+    "  <url>                   URL for requests.",
+    "                          example: http://localhost:6464/index.html",
     ""
 };
 
@@ -107,8 +103,9 @@ help(const char *app_name) {
 
 static void
 build_req(Perfer p) {
-    int		size = snprintf(NULL, 0, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n", p->path, p->addr);
     char	*end;
+    int		size = snprintf(NULL, 0, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
+				NULL == p->path ? "" : p->path, p->addr);
 
     for (Header h = p->headers; NULL != h; h = h->next) {
 	size += strlen(h->line) + 2;
@@ -120,9 +117,11 @@ build_req(Perfer p) {
     p->req_len = size;
     end = p->req_body;
     if (p->keep_alive) {
-	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n", p->path, p->addr);
+	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n",
+		       NULL == p->path ? "" : p->path, p->addr);
     } else {
-	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Close\r\n", p->path, p->addr);
+	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Close\r\n",
+		       NULL == p->path ? "" : p->path, p->addr);
     }
     for (Header h = p->headers; NULL != h; h = h->next) {
 	end = stpcpy(end, h->line);
@@ -135,9 +134,41 @@ build_req(Perfer p) {
 }
 
 static int
+parse_url(char *url, Perfer p) {
+    if (0 == strncasecmp("http://", url, 7)) {
+	url += 7;
+	p->tls = false;
+    } else if (0 == strncasecmp("https://", url, 8)) {
+	url += 8;
+	p->tls = true;
+    } else {
+	if (NULL != strstr(url, "://")) {
+	    printf("*-*-* invalid URL\n");
+	    return -1;
+	}
+    }
+    p->addr = url;
+
+    char	*s;
+
+    if (NULL != (s = strchr(url, ':'))) {
+	*s = '\0'; // end of address
+	url = s + 1;
+	p->port = url;
+    }
+    if (NULL != (s = strchr(url, '/'))) {
+	*s = '\0'; // end of port or address
+	url = s + 1;
+	p->path = url;
+    }
+    return 0;
+}
+
+static int
 perfer_init(Perfer p, int argc, const char **argv) {
     const char	*app_name = *argv;
     const char	*opt_val = NULL;
+    char	url[1024];
     char	*end;
     int		cnt;
     long	num = 0;
@@ -146,6 +177,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	printf("%s\n", strerror(errno));
 	return -1;
     }
+    *url = '\0';
     argv++;
     argc--;
     for (; 0 < argc; argc -= cnt, argv += cnt) {
@@ -261,17 +293,6 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	switch (cnt = arg_match(argc, argv, &p->path, "p", "-path")) {
-	case 0: // no match
-	    break;
-	case 1:
-	case 2:
-	    continue;
-	    break;
-	default: // match but something went wrong
-	    help(app_name);
-	    return -1;
-	}
 	switch (cnt = arg_match(argc, argv, &p->req_file, "r", "-request")) {
 	case 0: // no match
 	    break;
@@ -315,24 +336,29 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	if (NULL == p->addr) {
-	    p->addr = *argv;
+	if ('\0' == *url) {
+	    if (sizeof(url) <= (size_t)strlen(*argv)) {
+		printf("*-*-* URL too long.\n");
+		return -1;
+	    } else {
+		strcpy(url, *argv);
+	    }
 	    cnt = 1;
 	} else {
-	    printf("Only one server address is allowed.\n");
+	    printf("*-*-* Only one URL is allowed.\n");
 	    help(app_name);
 	    return -1;
 	}
     }
-    if (NULL == p->addr) {
-	printf("A server address is required.\n");
+    if ('\0' == *url) {
+	printf("*-*-* A URL is required.\n");
 	help(app_name);
 	return -1;
     }
+    if (0 != parse_url(url, p)) {
+	return -1;
+    }
     if (NULL == p->req_file) {
-	if ('/' == *p->path) {
-	    p->path = p->path + 1;
-	}
 	build_req(p);
 	if (0 > p->req_len) {
 	    printf("*-*-* Failed to allocate memory for GET request.\n");
@@ -377,6 +403,11 @@ perfer_init(Perfer p, int argc, const char **argv) {
 
     if (!p->keep_alive) {
 	p->backlog = 1;
+    }
+    if (p->tls) {
+	SSL_load_error_strings();
+	ERR_load_BIO_strings();
+	OpenSSL_add_all_algorithms();
     }
     for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
 	if (0 != (err = pool_init(pool, p, n))) {
@@ -462,7 +493,11 @@ perfer_start(Perfer p) {
 	stdev = sqrt(stdev) * 1000.0;
     }
     printf("Benchmarks for:\n");
-    printf("  URL:                %s/%s\n", p->addr, p->path);
+    printf("  URL:                %s://%s:%s/%s\n",
+	   p->tls ? "https" : "http",
+	   p->addr,
+	   (NULL == p->port) ? "80" : p->port,
+	   NULL == p->path ? "" : p->path);
     printf("  Threads:            %ld\n", p->tcnt);
     printf("  Connections/thread: %ld\n", p->ccnt);
     printf("  Duration:           %0.1f seconds\n", psum / p->tcnt);

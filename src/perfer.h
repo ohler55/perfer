@@ -21,6 +21,7 @@ typedef struct _perfer {
     long		tcnt;
     long		ccnt;
     const char		*addr;
+    const char		*port;
     const char		*path;
     double		duration;
     double		start_time;
@@ -31,7 +32,7 @@ typedef struct _perfer {
     bool		keep_alive;
     bool		verbose;
     bool		replace;
-    bool		use_ssl;
+    bool		tls;
     atomic_int		ready_cnt;
     atomic_int		seq;
     Header		headers;

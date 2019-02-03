@@ -32,6 +32,7 @@ drop_cleanup(Drop d) {
     }
     d->sock = 0;
     d->pp = NULL;
+    d->bio = NULL;
     memset(d->pipeline, 0, sizeof(d->pipeline));
     d->phead = 0;
     d->ptail = 0;
@@ -50,9 +51,8 @@ drop_pending(Drop d) {
     return len;
 }
 
-// Return non-zero on error.
-int
-drop_connect(Drop d, Pool p, struct addrinfo *res) {
+static int
+drop_connect_normal(Drop d, Pool p, struct addrinfo *res) {
     int	optval = 1;
 
     if (0 > (d->sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) ||
@@ -68,6 +68,23 @@ drop_connect(Drop d, Pool p, struct addrinfo *res) {
     d->rcnt = 0;
 
     return 0;
+}
+
+static int
+drop_connect_tls(Drop d, Pool p, struct addrinfo *res) {
+
+    // TBD
+
+    return 0;
+}
+
+// Return non-zero on error.
+int
+drop_connect(Drop d, Pool p, struct addrinfo *res) {
+    if (p->perfer->tls) {
+	return drop_connect_tls(d, p, res);
+    }
+    return drop_connect_normal(d, p, res);
 }
 
 bool
@@ -189,7 +206,7 @@ drop_recv(Drop d, Pool p, bool enough) {
 	    */
 	    if (d->h->verbose) {
 		char	save = d->buf[d->xsize];
-		
+
 		d->buf[d->xsize] = '\0';
 		pthread_mutex_lock(&p->perfer->print_mutex);
 		printf("\n%ld %ld %ld --------------------------------------------------------------------------------\n%s\n", d->xsize, d->rcnt, hsize, d->buf);

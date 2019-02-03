@@ -60,32 +60,21 @@ pool_cleanup(Pool p) {
 
 // Returns addrinfo for a host[:port] string with the default port of 80.
 static struct addrinfo*
-get_addr_info(const char *addr) {
+get_addr_info(const char *host, const char *port) {
     struct addrinfo	hints;
     struct addrinfo	*res;
-    char		host[1024];
-    const char		*port;
     int			err;
-    
+
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = PF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if (NULL == (port = strchr(addr, ':'))) {
-	err = getaddrinfo(addr, "80", &hints, &res);
-    } else if (sizeof(host) <= port - addr - 1) {
-	printf("*-*-* Host name too long: %s.\n", addr);
-	return NULL;
+    if (NULL == port) {
+	err = getaddrinfo(host, "80", &hints, &res);
     } else {
-	strncpy(host, addr, port - addr);
-	host[port - addr] = '\0';
-	port++;
-	if (0 != (err = getaddrinfo(host, port, &hints, &res))) {
-	    printf("*-*-* Failed to resolve %s. %s\n", addr, gai_strerror(err));
-	    return NULL;
-	}
+	err = getaddrinfo(host, port, &hints, &res);
     }
     if (0 != err) {
-	printf("*-*-* Failed to resolve %s.\n", addr);
+	printf("*-*-* Failed to resolve %s.\n", host);
 	return NULL;
     }
     return res;
@@ -100,12 +89,12 @@ loop(void *x) {
     int			pcnt = h->ccnt;
     struct pollfd	ps[pcnt];
     struct pollfd	*pp;
-    struct addrinfo	*res = get_addr_info(h->addr);
+    struct addrinfo	*res = get_addr_info(h->addr, h->port);
     double		end_time;
     double		now;
     bool		enough = false;
     int			pending;
-    
+
     if (NULL == res) {
 	perfer_stop(h);
 	return NULL;

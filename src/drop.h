@@ -5,6 +5,11 @@
 
 #include <stdbool.h>
 #include <poll.h>
+#ifdef WITH_OPENSSL
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
 
 //#define MAX_RESP_SIZE	16384
 #define MAX_RESP_SIZE	64000
@@ -18,11 +23,13 @@ typedef struct _drop {
     struct _perfer	*h; // for addr and request body
     int			sock;
     struct pollfd	*pp;
-
+#ifdef WITH_OPENSSL
+    BIO			*bio;
+#endif
     double		pipeline[PIPELINE_SIZE];
     int			phead;
     int			ptail;
-    
+
     long		rcnt;    // recv count
     long		xsize;   // expected size of message
     char		buf[MAX_RESP_SIZE];
