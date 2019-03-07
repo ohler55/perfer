@@ -33,6 +33,7 @@ typedef struct _perfer {
     bool		verbose;
     bool		replace;
     bool		tls;
+    bool		json;
     atomic_int		ready_cnt;
     atomic_int		seq;
     Header		headers;

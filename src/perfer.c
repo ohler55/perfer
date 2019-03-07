@@ -26,6 +26,19 @@ extern int asprintf(char **strp, const char *fmt, ...);
 
 #define VERSION	"1.3.1"
 
+
+typedef struct _results {
+    long	con_cnt;
+    long	sent_cnt;
+    long	ok_cnt;
+    long	err_cnt;
+    double	lat_sum;
+    double	psum;
+    double	lat;
+    double	rate;
+    double	stdev;
+} *Results;
+
 static struct _perfer	perfer = {
     .inited = false,
     .done = false,
@@ -47,6 +60,7 @@ static struct _perfer	perfer = {
     .verbose = false,
     .replace = false,
     .tls = false,
+    .json = false,
     .headers = NULL,
 };
 
@@ -87,6 +101,9 @@ static const char	*help_lines[] = {
     "",
     "  -a <name: value>        Add an HTTP header field with name and value.",
     "  --add <name: value>",
+    "",
+    "  -j                      JSON output.",
+    "  --json",
     "",
     "  <url>                   URL for requests.",
     "                          example: http://localhost:6464/index.html",
@@ -139,6 +156,8 @@ parse_url(char *url, Perfer p) {
 	url += 7;
 	p->tls = false;
     } else if (0 == strncasecmp("https://", url, 8)) {
+	printf("*-*-* TLS (https) not supported yet\n");
+	return -1;
 	url += 8;
 	p->tls = true;
     } else {
@@ -315,6 +334,17 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
+	switch (cnt = arg_match(argc, argv, NULL, "j", "-json")) {
+	case 0: // no match
+	    break;
+	case 1:
+	    p->json = true;
+	    continue;
+	    break;
+	default: // match but something went wrong
+	    help(app_name);
+	    return -1;
+	}
 	switch (cnt = arg_match(argc, argv, &opt_val, "a", "-add")) {
 	case 0: // no match
 	    break;
@@ -448,51 +478,13 @@ perfer_stop(Perfer p) {
     perfer_cleanup(p);
 }
 
-static int
-perfer_start(Perfer p) {
-    Pool	pool;
-    int		i;
-    int		err;
-    long	con_cnt = 0;
-    long	sent_cnt = 0;
-    long	ok_cnt = 0;
-    long	err_cnt = 0;
-    double	lat_sum = 0.0;
-    double	psum = 0.0;
-    double	lat = 0.0;
-    double	rate = 0.0;
-    double	stdev = 0.0;
-
-    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
-	if (0 != (err = pool_start(pool))) {
-	    perfer_stop(p);
-	    return err;
-	}
+static void
+print_out(Perfer p, Results r) {
+    if (0 < r->err_cnt) {
+	printf("%s encountered %ld errors.\n", p->addr, r->err_cnt);
     }
-    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
-	pool_wait(pool);
-	con_cnt += pool->con_cnt;
-	sent_cnt += pool->sent_cnt;
-	ok_cnt += pool->ok_cnt;
-	err_cnt += pool->err_cnt;
-	lat_sum += pool->lat_sum;
-	psum += pool->actual_end - p->start_time;
-	stdev += pool->lat_sq_sum;
-    }
-    // TBD actual times for each thread
-    if (0 < err_cnt) {
-	printf("%s encountered %ld errors.\n", p->addr, err_cnt);
-    }
-    if (ok_cnt + err_cnt < sent_cnt) {
-	printf("%s did not respond to %ld requests.\n", p->addr, sent_cnt - ok_cnt - err_cnt);
-    }
-    if (0.0 < psum) {
-	rate = (double)ok_cnt / (psum / p->tcnt);
-    }
-    if (0 < ok_cnt) {
-	lat = lat_sum * 1000.0 / ok_cnt;
-	stdev /= (double)ok_cnt;
-	stdev = sqrt(stdev) * 1000.0;
+    if (r->ok_cnt + r->err_cnt < r->sent_cnt) {
+	printf("%s did not respond to %ld requests.\n", p->addr, r->sent_cnt - r->ok_cnt - r->err_cnt);
     }
     printf("Benchmarks for:\n");
     printf("  URL:                %s://%s:%s/%s\n",
@@ -502,16 +494,87 @@ perfer_start(Perfer p) {
 	   NULL == p->path ? "" : p->path);
     printf("  Threads:            %ld\n", p->tcnt);
     printf("  Connections/thread: %ld\n", p->ccnt);
-    printf("  Duration:           %0.1f seconds\n", psum / p->tcnt);
+    printf("  Duration:           %0.1f seconds\n", r->psum / p->tcnt);
     printf("  Keep-Alive:         %s\n", p->keep_alive ? "true" : "false");
     printf("Results:\n");
-    if (0 < err_cnt) {
-	printf("  Failures:           %ld\n", err_cnt);
+    if (0 < r->err_cnt) {
+	printf("  Failures:           %ld\n", r->err_cnt);
     }
-    printf("  Connections:        %ld connection established\n", (long)con_cnt);
-    printf("  Throughput:         %ld requests/second\n", (long)rate);
-    printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", lat, stdev);
+    printf("  Connections:        %ld connection established\n", (long)r->con_cnt);
+    printf("  Throughput:         %ld requests/second\n", (long)r->rate);
+    printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", r->lat, r->stdev);
+}
 
+static void
+json_out(Perfer p, Results r) {
+    printf("{\n");
+    printf("  \"options\": {\n");
+    printf("    \"url\": \"%s://%s:%s/%s\",\n",
+	   p->tls ? "https" : "http",
+	   p->addr,
+	   (NULL == p->port) ? "80" : p->port,
+	   NULL == p->path ? "" : p->path);
+    printf("    \"threads\": %ld,\n", p->tcnt);
+    printf("    \"connectionsPerThread\": %ld,\n", p->ccnt);
+    printf("    \"duration\": %0.1f,\n", r->psum / p->tcnt);
+    printf("    \"keepAlive\": %s\n", p->keep_alive ? "true" : "false");
+    printf("  },\n");
+    printf("  \"results\": {\n");
+    if (0 < r->err_cnt) {
+	printf("    \"failures\": %ld,\n", r->err_cnt);
+    }
+    if (0 < r->err_cnt) {
+	printf("    \"errors\": %ld,\n", r->err_cnt);
+    }
+    if (r->ok_cnt + r->err_cnt < r->sent_cnt) {
+	printf("    \"noResponse\": %ld,\n", r->sent_cnt - r->ok_cnt - r->err_cnt);
+    }
+    printf("    \"connections\": %ld,\n", (long)r->con_cnt);
+    printf("    \"requestsPerSecond\": %ld,\n", (long)r->rate);
+    printf("    \"latencyMilliseconds\": %0.3f,\n", r->lat);
+    printf("    \"latencyStdev\": %0.3f\n", r->stdev);
+    printf("  }\n");
+    printf("}\n");
+}
+
+static int
+perfer_start(Perfer p) {
+    Pool		pool;
+    int			i;
+    int			err;
+    struct _results	r;
+
+    memset(&r, 0, sizeof(r));
+    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
+	if (0 != (err = pool_start(pool))) {
+	    perfer_stop(p);
+	    return err;
+	}
+    }
+    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
+	pool_wait(pool);
+	r.con_cnt += pool->con_cnt;
+	r.sent_cnt += pool->sent_cnt;
+	r.ok_cnt += pool->ok_cnt;
+	r.err_cnt += pool->err_cnt;
+	r.lat_sum += pool->lat_sum;
+	r.psum += pool->actual_end - p->start_time;
+	r.stdev += pool->lat_sq_sum;
+    }
+    // TBD actual times for each thread
+    if (0.0 < r.psum) {
+	r.rate = (double)r.ok_cnt / (r.psum / p->tcnt);
+    }
+    if (0 < r.ok_cnt) {
+	r.lat = r.lat_sum * 1000.0 / r.ok_cnt;
+	r.stdev /= (double)r.ok_cnt;
+	r.stdev = sqrt(r.stdev) * 1000.0;
+    }
+    if (p->json) {
+	json_out(p, &r);
+    } else {
+	print_out(p, &r);
+    }
     return 0;
 }
 
