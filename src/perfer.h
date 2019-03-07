@@ -23,6 +23,7 @@ typedef struct _perfer {
     const char		*addr;
     const char		*port;
     const char		*path;
+    const char		*post;
     double		duration;
     double		start_time;
     const char		*req_file;

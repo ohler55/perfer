@@ -24,8 +24,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.3.1"
-
+#define VERSION	"1.4.0"
 
 typedef struct _results {
     long	con_cnt;
@@ -46,6 +45,7 @@ static struct _perfer	perfer = {
     .addr = NULL,
     .port = NULL,
     .path = NULL,
+    .post = NULL,
     .tcnt = 1,
     .ccnt = 1,
     .duration = 1.0,
@@ -102,6 +102,9 @@ static const char	*help_lines[] = {
     "  -a <name: value>        Add an HTTP header field with name and value.",
     "  --add <name: value>",
     "",
+    "  -p <content>            HTTP POST with the content provided.",
+    "  --post <content>        example: -p 'mutation { repeat(word: \"Hello\") }'",
+    "",
     "  -j                      JSON output.",
     "  --json",
     "",
@@ -121,11 +124,21 @@ help(const char *app_name) {
 static void
 build_req(Perfer p) {
     char	*end;
-    int		size = snprintf(NULL, 0, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
+    const char	*con = p->keep_alive ? "Keep-Alive" : "Close";
+    const char	*method = (NULL == p->post) ? "GET" : "POST";
+    size_t	clen = 0;
+
+    // size of longest possible
+    int		size = snprintf(NULL, 0, "POST /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
 				NULL == p->path ? "" : p->path, p->addr);
 
     for (Header h = p->headers; NULL != h; h = h->next) {
 	size += strlen(h->line) + 2;
+    }
+    if (NULL != p->post) {
+	clen = strlen(p->post);
+	// size of content plus Content-Length: n\n\r\n
+	size += strlen(p->post) + snprintf(NULL, 0, "Content-Length: %ld\r\n", clen);
     }
     if (NULL == (p->req_body = (char*)malloc(size + 1))) {
 	printf("*-*-* Out of memory.\n");
@@ -133,20 +146,22 @@ build_req(Perfer p) {
     }
     p->req_len = size;
     end = p->req_body;
-    if (p->keep_alive) {
-	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n",
-		       NULL == p->path ? "" : p->path, p->addr);
-    } else {
-	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Close\r\n",
-		       NULL == p->path ? "" : p->path, p->addr);
-    }
+
+    end += sprintf(end, "%s /%s HTTP/1.1\r\nHost: %s\r\nConnection: %s\r\n",
+		   method, NULL == p->path ? "" : p->path, p->addr, con);
     for (Header h = p->headers; NULL != h; h = h->next) {
 	end = stpcpy(end, h->line);
 	*end++ = '\r';
 	*end++ = '\n';
     }
+    if (NULL != p->post) {
+	end += sprintf(end, "Content-Length: %ld\r\n", clen);
+    }
     *end++ = '\r';
     *end++ = '\n';
+    if (NULL != p->post) {
+	end = stpcpy(end, p->post);
+    }
     p->req_body[size] = '\0';
 }
 
@@ -366,6 +381,19 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
+	switch (cnt = arg_match(argc, argv, &opt_val, "p", "-post")) {
+	case 0: // no match
+	    break;
+	case 1:
+	case 2: {
+	    p->post = opt_val;
+	    continue;
+	    break;
+	}
+	default: // match but something went wrong
+	    help(app_name);
+	    return -1;
+	}
 	if ('\0' == *url) {
 	    if (sizeof(url) <= (size_t)strlen(*argv)) {
 		printf("*-*-* URL too long.\n");
@@ -416,6 +444,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    return -1;
 	}
 	p->req_body[p->req_len] = '\0';
+	p->keep_alive = (NULL != strcasestr(p->req_body, "keep-alive"));
 	if (0 != fclose(f)) {
 	    printf("-*-*- Failed to close %s. %s. ignoring\n", p->req_file, strerror(errno));
 	}

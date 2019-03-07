@@ -1,5 +1,15 @@
 # CHANGELOG
 
+### 1.4.0 - 2019-03-07
+
+Command line options changed with a focus on using a URL.
+
+- URL for host, port, and path.
+
+- JSON ouput option added.
+
+- `--post` option added to make it easier to benchmark POST requests.
+
 ### 1.3.0 - 2019-01-30
 
 Add connection count to output.
