@@ -8,6 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef WITH_OPENSSL
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 #include "arg.h"
 #include "drop.h"
 #include "pool.h"
@@ -18,14 +24,28 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.3.0"
+#define VERSION	"1.3.1"
+
+
+typedef struct _results {
+    long	con_cnt;
+    long	sent_cnt;
+    long	ok_cnt;
+    long	err_cnt;
+    double	lat_sum;
+    double	psum;
+    double	lat;
+    double	rate;
+    double	stdev;
+} *Results;
 
 static struct _perfer	perfer = {
     .inited = false,
     .done = false,
     .pools = NULL,
     .addr = NULL,
-    .path = "index.html",
+    .port = NULL,
+    .path = NULL,
     .tcnt = 1,
     .ccnt = 1,
     .duration = 1.0,
@@ -39,11 +59,13 @@ static struct _perfer	perfer = {
     .keep_alive = false,
     .verbose = false,
     .replace = false,
+    .tls = false,
+    .json = false,
     .headers = NULL,
 };
 
 static const char	*help_lines[] = {
-    "saturate a web server with HTTP requests while tracking the number of requests,",
+    "Saturates a web server with HTTP requests while tracking the number of requests,",
     "latency, and throughput. After the duration specified no more requests are sent",
     "and the application terminates when all responses have been received or 10",
     "seconds, which ever is sooner.",
@@ -71,9 +93,6 @@ static const char	*help_lines[] = {
     "  -b <number>             Maximum backlog for pipeline on a connection.",
     "  --backlog <number>      (default: 1, range 1 - 15)",
     "",
-    "  -p <path>               URL path of the HTTP request. (default: /)",
-    "  --path <path>",
-    "",
     "  -r <file>               File with the full content of the HTTP request.",
     "  --request <file>        The -keep-alive option is ignored.",
     "",
@@ -83,7 +102,11 @@ static const char	*help_lines[] = {
     "  -a <name: value>        Add an HTTP header field with name and value.",
     "  --add <name: value>",
     "",
-    "  <server-address>        IP address of the server to send requests to.",
+    "  -j                      JSON output.",
+    "  --json",
+    "",
+    "  <url>                   URL for requests.",
+    "                          example: http://localhost:6464/index.html",
     ""
 };
 
@@ -97,8 +120,9 @@ help(const char *app_name) {
 
 static void
 build_req(Perfer p) {
-    int		size = snprintf(NULL, 0, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n", p->path, p->addr);
     char	*end;
+    int		size = snprintf(NULL, 0, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
+				NULL == p->path ? "" : p->path, p->addr);
 
     for (Header h = p->headers; NULL != h; h = h->next) {
 	size += strlen(h->line) + 2;
@@ -110,9 +134,11 @@ build_req(Perfer p) {
     p->req_len = size;
     end = p->req_body;
     if (p->keep_alive) {
-	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n", p->path, p->addr);
+	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n",
+		       NULL == p->path ? "" : p->path, p->addr);
     } else {
-	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Close\r\n", p->path, p->addr);
+	end += sprintf(end, "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: Close\r\n",
+		       NULL == p->path ? "" : p->path, p->addr);
     }
     for (Header h = p->headers; NULL != h; h = h->next) {
 	end = stpcpy(end, h->line);
@@ -125,17 +151,52 @@ build_req(Perfer p) {
 }
 
 static int
+parse_url(char *url, Perfer p) {
+    if (0 == strncasecmp("http://", url, 7)) {
+	url += 7;
+	p->tls = false;
+    } else if (0 == strncasecmp("https://", url, 8)) {
+	printf("*-*-* TLS (https) not supported yet\n");
+	return -1;
+	url += 8;
+	p->tls = true;
+    } else {
+	if (NULL != strstr(url, "://")) {
+	    printf("*-*-* invalid URL\n");
+	    return -1;
+	}
+    }
+    p->addr = url;
+
+    char	*s;
+
+    if (NULL != (s = strchr(url, ':'))) {
+	*s = '\0'; // end of address
+	url = s + 1;
+	p->port = url;
+    }
+    if (NULL != (s = strchr(url, '/'))) {
+	*s = '\0'; // end of port or address
+	url = s + 1;
+	p->path = url;
+    }
+    return 0;
+}
+
+static int
 perfer_init(Perfer p, int argc, const char **argv) {
     const char	*app_name = *argv;
     const char	*opt_val = NULL;
+    char	url[1024];
     char	*end;
     int		cnt;
     long	num = 0;
-    
+
     if (0 != pthread_mutex_init(&p->print_mutex, 0)) {
 	printf("%s\n", strerror(errno));
 	return -1;
     }
+    *url = '\0';
     argv++;
     argc--;
     for (; 0 < argc; argc -= cnt, argv += cnt) {
@@ -251,17 +312,6 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	switch (cnt = arg_match(argc, argv, &p->path, "p", "-path")) {
-	case 0: // no match
-	    break;
-	case 1:
-	case 2:
-	    continue;
-	    break;
-	default: // match but something went wrong
-	    help(app_name);
-	    return -1;
-	}
 	switch (cnt = arg_match(argc, argv, &p->req_file, "r", "-request")) {
 	case 0: // no match
 	    break;
@@ -278,6 +328,17 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    break;
 	case 1:
 	    p->keep_alive = true;
+	    continue;
+	    break;
+	default: // match but something went wrong
+	    help(app_name);
+	    return -1;
+	}
+	switch (cnt = arg_match(argc, argv, NULL, "j", "-json")) {
+	case 0: // no match
+	    break;
+	case 1:
+	    p->json = true;
 	    continue;
 	    break;
 	default: // match but something went wrong
@@ -305,24 +366,29 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	if (NULL == p->addr) {
-	    p->addr = *argv;
+	if ('\0' == *url) {
+	    if (sizeof(url) <= (size_t)strlen(*argv)) {
+		printf("*-*-* URL too long.\n");
+		return -1;
+	    } else {
+		strcpy(url, *argv);
+	    }
 	    cnt = 1;
 	} else {
-	    printf("Only one server address is allowed.\n");
+	    printf("*-*-* Only one URL is allowed.\n");
 	    help(app_name);
 	    return -1;
 	}
     }
-    if (NULL == p->addr) {
-	printf("A server address is required.\n");
+    if ('\0' == *url) {
+	printf("*-*-* A URL is required.\n");
 	help(app_name);
 	return -1;
     }
+    if (0 != parse_url(url, p)) {
+	return -1;
+    }
     if (NULL == p->req_file) {
-	if ('/' == *p->path) {
-	    p->path = p->path + 1;
-	}	
 	build_req(p);
 	if (0 > p->req_len) {
 	    printf("*-*-* Failed to allocate memory for GET request.\n");
@@ -368,6 +434,13 @@ perfer_init(Perfer p, int argc, const char **argv) {
     if (!p->keep_alive) {
 	p->backlog = 1;
     }
+#ifdef WITH_OPENSSL
+    if (p->tls) {
+	SSL_load_error_strings();
+	ERR_load_BIO_strings();
+	OpenSSL_add_all_algorithms();
+    }
+#endif
     for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
 	if (0 != (err = pool_init(pool, p, n))) {
 	    return err;
@@ -395,7 +468,7 @@ perfer_cleanup(Perfer p) {
 void
 perfer_stop(Perfer p) {
     p->done = true;
-    
+
     Pool	pool;
     int		i;
 
@@ -405,21 +478,73 @@ perfer_stop(Perfer p) {
     perfer_cleanup(p);
 }
 
+static void
+print_out(Perfer p, Results r) {
+    if (0 < r->err_cnt) {
+	printf("%s encountered %ld errors.\n", p->addr, r->err_cnt);
+    }
+    if (r->ok_cnt + r->err_cnt < r->sent_cnt) {
+	printf("%s did not respond to %ld requests.\n", p->addr, r->sent_cnt - r->ok_cnt - r->err_cnt);
+    }
+    printf("Benchmarks for:\n");
+    printf("  URL:                %s://%s:%s/%s\n",
+	   p->tls ? "https" : "http",
+	   p->addr,
+	   (NULL == p->port) ? "80" : p->port,
+	   NULL == p->path ? "" : p->path);
+    printf("  Threads:            %ld\n", p->tcnt);
+    printf("  Connections/thread: %ld\n", p->ccnt);
+    printf("  Duration:           %0.1f seconds\n", r->psum / p->tcnt);
+    printf("  Keep-Alive:         %s\n", p->keep_alive ? "true" : "false");
+    printf("Results:\n");
+    if (0 < r->err_cnt) {
+	printf("  Failures:           %ld\n", r->err_cnt);
+    }
+    printf("  Connections:        %ld connection established\n", (long)r->con_cnt);
+    printf("  Throughput:         %ld requests/second\n", (long)r->rate);
+    printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", r->lat, r->stdev);
+}
+
+static void
+json_out(Perfer p, Results r) {
+    printf("{\n");
+    printf("  \"options\": {\n");
+    printf("    \"url\": \"%s://%s:%s/%s\",\n",
+	   p->tls ? "https" : "http",
+	   p->addr,
+	   (NULL == p->port) ? "80" : p->port,
+	   NULL == p->path ? "" : p->path);
+    printf("    \"threads\": %ld,\n", p->tcnt);
+    printf("    \"connectionsPerThread\": %ld,\n", p->ccnt);
+    printf("    \"duration\": %0.1f,\n", r->psum / p->tcnt);
+    printf("    \"keepAlive\": %s\n", p->keep_alive ? "true" : "false");
+    printf("  },\n");
+    printf("  \"results\": {\n");
+    if (0 < r->err_cnt) {
+	printf("    \"failures\": %ld,\n", r->err_cnt);
+    }
+    if (0 < r->err_cnt) {
+	printf("    \"errors\": %ld,\n", r->err_cnt);
+    }
+    if (r->ok_cnt + r->err_cnt < r->sent_cnt) {
+	printf("    \"noResponse\": %ld,\n", r->sent_cnt - r->ok_cnt - r->err_cnt);
+    }
+    printf("    \"connections\": %ld,\n", (long)r->con_cnt);
+    printf("    \"requestsPerSecond\": %ld,\n", (long)r->rate);
+    printf("    \"latencyMilliseconds\": %0.3f,\n", r->lat);
+    printf("    \"latencyStdev\": %0.3f\n", r->stdev);
+    printf("  }\n");
+    printf("}\n");
+}
+
 static int
 perfer_start(Perfer p) {
-    Pool	pool;
-    int		i;
-    int		err;
-    long	con_cnt = 0;
-    long	sent_cnt = 0;
-    long	ok_cnt = 0;
-    long	err_cnt = 0;
-    double	lat_sum = 0.0;
-    double	psum = 0.0;
-    double	lat = 0.0;
-    double	rate = 0.0;
-    double	stdev = 0.0;
-    
+    Pool		pool;
+    int			i;
+    int			err;
+    struct _results	r;
+
+    memset(&r, 0, sizeof(r));
     for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
 	if (0 != (err = pool_start(pool))) {
 	    perfer_stop(p);
@@ -428,43 +553,28 @@ perfer_start(Perfer p) {
     }
     for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
 	pool_wait(pool);
-	con_cnt += pool->con_cnt;
-	sent_cnt += pool->sent_cnt;
-	ok_cnt += pool->ok_cnt;
-	err_cnt += pool->err_cnt;
-	lat_sum += pool->lat_sum;
-	psum += pool->actual_end - p->start_time;
-	stdev += pool->lat_sq_sum;
+	r.con_cnt += pool->con_cnt;
+	r.sent_cnt += pool->sent_cnt;
+	r.ok_cnt += pool->ok_cnt;
+	r.err_cnt += pool->err_cnt;
+	r.lat_sum += pool->lat_sum;
+	r.psum += pool->actual_end - p->start_time;
+	r.stdev += pool->lat_sq_sum;
     }
     // TBD actual times for each thread
-    if (0 < err_cnt) {
-	printf("%s encountered %ld errors.\n", p->addr, err_cnt);
+    if (0.0 < r.psum) {
+	r.rate = (double)r.ok_cnt / (r.psum / p->tcnt);
     }
-    if (ok_cnt + err_cnt < sent_cnt) {
-	printf("%s did not respond to %ld requests.\n", p->addr, sent_cnt - ok_cnt - err_cnt);
+    if (0 < r.ok_cnt) {
+	r.lat = r.lat_sum * 1000.0 / r.ok_cnt;
+	r.stdev /= (double)r.ok_cnt;
+	r.stdev = sqrt(r.stdev) * 1000.0;
     }
-    if (0.0 < psum) {
-	rate = (double)ok_cnt / (psum / p->tcnt);
+    if (p->json) {
+	json_out(p, &r);
+    } else {
+	print_out(p, &r);
     }
-    if (0 < ok_cnt) {
-	lat = lat_sum * 1000.0 / ok_cnt;
-	stdev /= (double)ok_cnt;
-	stdev = sqrt(stdev) * 1000.0;
-    }
-    printf("Benchmarks for:\n");
-    printf("  URL:                %s/%s\n", p->addr, p->path);
-    printf("  Threads:            %ld\n", p->tcnt);
-    printf("  Connections/thread: %ld\n", p->ccnt);
-    printf("  Duration:           %0.1f seconds\n", psum / p->tcnt);
-    printf("  Keep-Alive:         %s\n", p->keep_alive ? "true" : "false");
-    printf("Results:\n");
-    if (0 < err_cnt) {
-	printf("  Failures:           %ld\n", err_cnt);
-    }
-    printf("  Connections:        %ld connection established\n", (long)con_cnt);
-    printf("  Throughput:         %ld requests/second\n", (long)rate);
-    printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", lat, stdev);
-    
     return 0;
 }
 
@@ -480,7 +590,7 @@ sig_handler(int sig) {
 int
 main(int argc, const char **argv) {
     int	err;
-    
+
     if (0 != (err = perfer_init(&perfer, argc, argv))) {
 	return err;
     }
