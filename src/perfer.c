@@ -1,5 +1,6 @@
 // Copyright 2016 by Peter Ohler, All Rights Reserved
 
+#include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <math.h>
@@ -42,6 +43,7 @@ static struct _perfer	perfer = {
     .inited = false,
     .done = false,
     .pools = NULL,
+    .url = NULL,
     .addr = NULL,
     .port = NULL,
     .path = NULL,
@@ -56,6 +58,7 @@ static struct _perfer	perfer = {
     .req_body = NULL,
     .req_len = 0,
     .backlog = 1, // PIPELINE_SIZE - 1,
+    .poll_timeout = 0,
     .keep_alive = false,
     .verbose = false,
     .replace = false,
@@ -112,6 +115,7 @@ static const char	*help_lines[] = {
     "                          example: http://localhost:6464/index.html",
     ""
 };
+// hidden option is -z for poll_timeout
 
 static void
 help(const char *app_name) {
@@ -127,10 +131,8 @@ build_req(Perfer p) {
     const char	*con = p->keep_alive ? "Keep-Alive" : "Close";
     const char	*method = (NULL == p->post) ? "GET" : "POST";
     size_t	clen = 0;
-
-    // size of longest possible
-    int		size = snprintf(NULL, 0, "POST /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
-				NULL == p->path ? "" : p->path, p->addr);
+    int		size = snprintf(NULL, 0, "%s /%s HTTP/1.1\r\nHost: %s\r\nConnection: Keep-Alive\r\n\r\n",
+				method, NULL == p->path ? "" : p->path, p->addr);
 
     for (Header h = p->headers; NULL != h; h = h->next) {
 	size += strlen(h->line) + 2;
@@ -146,7 +148,6 @@ build_req(Perfer p) {
     }
     p->req_len = size;
     end = p->req_body;
-
     end += sprintf(end, "%s /%s HTTP/1.1\r\nHost: %s\r\nConnection: %s\r\n",
 		   method, NULL == p->path ? "" : p->path, p->addr, con);
     for (Header h = p->headers; NULL != h; h = h->next) {
@@ -165,8 +166,24 @@ build_req(Perfer p) {
     p->req_body[size] = '\0';
 }
 
+static bool
+has_keep_alive(const char *str) {
+    char	*lo = strdup(str);
+    bool	has;
+
+    for (char *s = lo; '\0' == *s; s++) {
+	*s = tolower(*s);
+    }
+    has = (NULL != strstr(lo, "keep-alive"));
+    free(lo);
+
+    return has;
+}
+
 static int
-parse_url(char *url, Perfer p) {
+parse_url(Perfer p) {
+    const char	*url = p->url;
+
     if (0 == strncasecmp("http://", url, 7)) {
 	url += 7;
 	p->tls = false;
@@ -202,7 +219,6 @@ static int
 perfer_init(Perfer p, int argc, const char **argv) {
     const char	*app_name = *argv;
     const char	*opt_val = NULL;
-    char	url[1024];
     char	*end;
     int		cnt;
     long	num = 0;
@@ -211,7 +227,6 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	printf("%s\n", strerror(errno));
 	return -1;
     }
-    *url = '\0';
     argv++;
     argc--;
     for (; 0 < argc; argc -= cnt, argv += cnt) {
@@ -381,6 +396,23 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
+	switch (cnt = arg_match(argc, argv, &opt_val, "z", "-poll_timeout")) {
+	case 0: // no match
+	    break;
+	case 1:
+	case 2:
+	    p->poll_timeout = strtol(opt_val, &end, 10);
+	    if ('\0' != *end || 0 > p->poll_timeout || 1000 <= p->poll_timeout) {
+		printf("'%s' is not a valid poll timeout number.\n", opt_val);
+		help(app_name);
+		return -1;
+	    }
+	    continue;
+	    break;
+	default: // match but something went wrong
+	    help(app_name);
+	    return -1;
+	}
 	switch (cnt = arg_match(argc, argv, &opt_val, "p", "-post")) {
 	case 0: // no match
 	    break;
@@ -394,13 +426,8 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	if ('\0' == *url) {
-	    if (sizeof(url) <= (size_t)strlen(*argv)) {
-		printf("*-*-* URL too long.\n");
-		return -1;
-	    } else {
-		strcpy(url, *argv);
-	    }
+	if (NULL == p->url) {
+	    p->url = *argv;
 	    cnt = 1;
 	} else {
 	    printf("*-*-* Only one URL is allowed.\n");
@@ -408,12 +435,13 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    return -1;
 	}
     }
-    if ('\0' == *url) {
+    if (NULL == p->url) {
 	printf("*-*-* A URL is required.\n");
 	help(app_name);
 	return -1;
     }
-    if (0 != parse_url(url, p)) {
+
+    if (0 != parse_url(p)) {
 	return -1;
     }
     if (NULL == p->req_file) {
@@ -444,10 +472,10 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    return -1;
 	}
 	p->req_body[p->req_len] = '\0';
-	p->keep_alive = (NULL != strcasestr(p->req_body, "keep-alive"));
 	if (0 != fclose(f)) {
 	    printf("-*-*- Failed to close %s. %s. ignoring\n", p->req_file, strerror(errno));
 	}
+	p->keep_alive = has_keep_alive(p->req_body);
 	p->replace = (NULL != strstr(p->req_body, "${sequence}"));
     }
     p->inited = true;

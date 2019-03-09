@@ -20,6 +20,7 @@ typedef struct _perfer {
     struct _pool	*pools;
     long		tcnt;
     long		ccnt;
+    const char		*url;
     const char		*addr;
     const char		*port;
     const char		*path;
@@ -30,6 +31,7 @@ typedef struct _perfer {
     char		*req_body;
     long		req_len;
     int			backlog;
+    int			poll_timeout;
     bool		keep_alive;
     bool		verbose;
     bool		replace;

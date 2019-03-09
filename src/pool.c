@@ -94,6 +94,7 @@ loop(void *x) {
     double		now;
     bool		enough = false;
     int			pending;
+    int			pt = h->poll_timeout;
 
     if (NULL == res) {
 	perfer_stop(h);
@@ -144,7 +145,7 @@ LOOP:
 	if (pp == ps) {
 	    break;
 	}
-	if (0 > (i = poll(ps, pp - ps, 10))) {
+	if (0 > (i = poll(ps, pp - ps, pt))) {
 	    if (EAGAIN == errno) {
 		continue;
 	    }
