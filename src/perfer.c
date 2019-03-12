@@ -42,6 +42,7 @@ typedef struct _results {
 static struct _perfer	perfer = {
     .inited = false,
     .done = false,
+    .drops = NULL,
     .pools = NULL,
     .url = NULL,
     .addr = NULL,
@@ -87,11 +88,11 @@ static const char	*help_lines[] = {
     "  --number <count>        rounded to the lowest multiple of the number of",
     "                          threads.",
     "",
-    "  -t <number>             Number of threads to use for sending requests.",
-    "  --threads <number>      (default: 1)",
+    "  -t <number>             Number of threads to use for sending requests and",
+    "  --threads <number>      receiving responses. (default: 1)",
     "",
-    "  -c <number>             Number of connection to use for sending requests",
-    "  --connections <number>  for each thread (default: 1)",
+    "  -c <number>             Total number of connection to use for sending",
+    "  --connections <number>  requests (default: 1)",
     "",
     "  -b <number>             Maximum backlog for pipeline on a connection.",
     "  --backlog <number>      (default: 1, range 1 - 15)",
@@ -444,6 +445,10 @@ perfer_init(Perfer p, int argc, const char **argv) {
     if (0 != parse_url(p)) {
 	return -1;
     }
+    if (0 != queue_init(&p->q, p->ccnt + 4)) {
+	printf("*-*-* Not enough memory for connection queue.\n");
+	return -1;
+    }
     if (NULL == p->req_file) {
 	build_req(p);
 	if (0 > p->req_len) {
@@ -518,6 +523,8 @@ perfer_cleanup(Perfer p) {
     for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
 	pool_cleanup(pool);
     }
+    free(p->drops);
+    queue_cleanup(&p->q);
     free(p->pools);
     free(p->req_body);
 }

@@ -11,7 +11,7 @@ struct _perfer;
 typedef struct _pool {
     struct _drop	*drops;
     int			dcnt;
-    int			max_pending;
+    int			max_pending; // get from queue
     long		num;
     long		con_cnt;
     long		sent_cnt;

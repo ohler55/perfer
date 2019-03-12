@@ -7,6 +7,8 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 
+#include "queue.h"
+
 struct _pool;
 
 typedef struct _header {
@@ -17,6 +19,9 @@ typedef struct _header {
 typedef struct _perfer {
     bool		inited;
     volatile bool	done;
+    struct _queue	q;
+    struct _drop	*drops;
+
     struct _pool	*pools;
     long		tcnt;
     long		ccnt;

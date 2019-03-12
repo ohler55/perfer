@@ -95,6 +95,15 @@ loop(void *x) {
     bool		enough = false;
     int			pending;
     int			pt = h->poll_timeout;
+    double		sum = 0.0;
+    double		start;
+    double		msum = 0.0;
+    long		mcnt = 0;
+    long		total = 0;
+    long		ready = 0;
+    pthread_mutex_t	mu;
+
+    pthread_mutex_init(&mu, 0);
 
     if (NULL == res) {
 	perfer_stop(h);
@@ -145,17 +154,27 @@ LOOP:
 	if (pp == ps) {
 	    break;
 	}
+	start = dtime();
+	pthread_mutex_lock(&mu);
+	pthread_mutex_unlock(&mu);
+	msum += dtime() - start;
+	start = dtime();
 	if (0 > (i = poll(ps, pp - ps, pt))) {
+	    sum += dtime() - start;
+	    mcnt++;
 	    if (EAGAIN == errno) {
 		continue;
 	    }
 	    printf("*-*-* polling error: %s\n", strerror(errno));
 	    break;
 	}
+	sum += dtime() - start;
+	mcnt++;
 	if (0 == i) {
 	    continue;
 	}
 	for (d = p->drops, i = pcnt; 0 < i; i--, d++) {
+	    total++;
 	    if (NULL == d->pp || 0 == d->pp->revents || 0 == d->sock) {
 		continue;
 	    }
@@ -165,6 +184,9 @@ LOOP:
 		}
 	    }
 	    if (!enough && 0 != (d->pp->revents & POLLOUT)) {
+		if (!(d->h->backlog <= drop_pending(d))) {
+		    ready++;
+		}
 		if (drop_send(d, p)) {
 		    continue;
 		}
@@ -184,7 +206,7 @@ LOOP:
     }
     freeaddrinfo(res);
     p->finished = true;
-
+    printf("*** poll time: %f mutex: %f\n", sum * 1000.0 / mcnt, msum * 1000.0 / mcnt);
     return NULL;
 }
 

@@ -56,6 +56,7 @@ drop_pending(Drop d) {
 static int
 drop_connect_normal(Drop d, Pool p, struct addrinfo *res) {
     int	optval = 1;
+    int	flags;
 
     if (0 > (d->sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) ||
 	0 > setsockopt(d->sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval)) ||
@@ -66,7 +67,8 @@ drop_connect_normal(Drop d, Pool p, struct addrinfo *res) {
 	p->actual_end = dtime();
 	return errno;
     }
-    fcntl(d->sock, F_SETFL, O_NONBLOCK);
+    flags = fcntl(d->sock, F_GETFL, 0);
+    fcntl(d->sock, F_SETFL, O_NONBLOCK | flags);
     d->rcnt = 0;
 
     return 0;
