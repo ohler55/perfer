@@ -1,5 +1,6 @@
 // Copyright 2015, 2016, 2018 by Peter Ohler, All Rights Reserved
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 
