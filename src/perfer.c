@@ -58,6 +58,7 @@ static struct _perfer	perfer = {
     .port = NULL,
     .path = NULL,
     .post = NULL,
+    .addr_info = NULL,
     .tcnt = 1,
     .ccnt = 1,
     .num = 0,
@@ -224,6 +225,28 @@ parse_url(Perfer p) {
 	p->path = url;
     }
     return 0;
+}
+
+// Returns addrinfo for a host[:port] string with the default port of 80.
+static struct addrinfo*
+get_addr_info(const char *host, const char *port) {
+    struct addrinfo	hints;
+    struct addrinfo	*res;
+    int			err;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = PF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (NULL == port) {
+	err = getaddrinfo(host, "80", &hints, &res);
+    } else {
+	err = getaddrinfo(host, port, &hints, &res);
+    }
+    if (0 != err) {
+	printf("*-*-* Failed to resolve %s.\n", host);
+	return NULL;
+    }
+    return res;
 }
 
 static int
@@ -500,6 +523,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
     Drop	d;
     int		i;
 
+    p->addr_info = get_addr_info(p->addr, p->port);
     if (!p->keep_alive) {
 	p->backlog = 1;
     }
@@ -534,6 +558,7 @@ perfer_cleanup(Perfer p) {
 	drop_cleanup(d);
     }
     free(p->drops);
+    free(p->addr_info);
     queue_cleanup(&p->q);
     free(p->pools);
     free(p->req_body);
@@ -611,43 +636,17 @@ json_out(Perfer p, Results r) {
     printf("}\n");
 }
 
-// Returns addrinfo for a host[:port] string with the default port of 80.
-static struct addrinfo*
-get_addr_info(const char *host, const char *port) {
-    struct addrinfo	hints;
-    struct addrinfo	*res;
-    int			err;
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = PF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    if (NULL == port) {
-	err = getaddrinfo(host, "80", &hints, &res);
-    } else {
-	err = getaddrinfo(host, port, &hints, &res);
-    }
-    if (0 != err) {
-	printf("*-*-* Failed to resolve %s.\n", host);
-	return NULL;
-    }
-    return res;
-}
-
-// TBD get rid of this
-#define START_DELAY	0.5
-
 static void*
 poll_loop(void *x) {
     Perfer		p = (Perfer)x;
     struct pollfd	ps[p->ccnt];
     struct pollfd	*pp;
-    struct addrinfo	*res = get_addr_info(p->addr, p->port);
     Drop		d;
     int			i;
     int			dcnt = p->ccnt;
     int			pending;
     int			pt = p->poll_timeout;
-    double		end_time = dtime() + p->duration + START_DELAY;
+    double		end_time = dtime() + p->duration;
     double		now;
     long		sent_cnt;
 
@@ -676,14 +675,12 @@ poll_loop(void *x) {
 	}
 	sent_cnt = 0;
 	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
-	    sent_cnt += atomic_load(&d->sent_cnt);
+	    if (0 < p->num) {
+		sent_cnt += atomic_load(&d->sent_cnt);
+	    }
 	    if (0 == d->sock && !p->enough) {
-		if (drop_connect(d, res)) {
-		    // Failed to connect. Abort the test.
-		    perfer_stop(p);
-		    return NULL;
-		}
-		d->con_cnt++;
+		queue_push(&p->q, d);
+		continue;
 	    }
 	    if (0 < d->sock) {
 		pp->fd = d->sock;
@@ -751,10 +748,6 @@ perfer_start(Perfer p) {
 	    return err;
 	}
     }
-    dsleep(START_DELAY);
-    for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
-	queue_push(&p->q, d);
-    }
     for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
 	pool_wait(pool);
     }
@@ -770,13 +763,10 @@ perfer_start(Perfer p) {
 	}
 	r.stdev += d->lat_sq_sum;
     }
-    // TBD better average over drops
-
     if (0.0 < r.psum) {
 	r.psum /= tcnt;
 	r.rate = (double)r.ok_cnt / r.psum;
     }
-    printf("*** r.ok_cnt: %ld  dt %f\n", r.ok_cnt, r.psum);
     if (0 < r.ok_cnt) {
 	r.lat = r.lat_sum * 1000.0 / r.ok_cnt;
 	r.stdev /= (double)r.ok_cnt;

@@ -79,6 +79,7 @@ queue_pop(Queue q, double timeout) {
     item = *(Drop*)atomic_load(&q->head);
 
     if (NULL != item) {
+	item->queued = false;
 	*(Drop*)atomic_load(&q->head) = NULL;
 	atomic_flag_clear(&q->pop_lock);
 

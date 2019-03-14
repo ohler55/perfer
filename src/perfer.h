@@ -10,6 +10,7 @@
 #include "queue.h"
 
 struct _pool;
+struct addrinfo;
 
 typedef struct _header {
     struct _header	*next;
@@ -32,6 +33,7 @@ typedef struct _perfer {
     const char		*port;
     const char		*path;
     const char		*post;
+    struct addrinfo	*addr_info;
     double		duration;
     double		start_time;
     const char		*req_file;

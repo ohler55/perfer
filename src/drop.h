@@ -17,12 +17,10 @@
 #define PIPELINE_SIZE	16
 
 struct _perfer;
-struct _pool;
-struct addrinfo;
 
 typedef struct _drop {
     struct _perfer	*perfer; // for addr and request body
-    int			sock;
+    volatile int	sock;
     struct pollfd	*pp;
 #ifdef WITH_OPENSSL
     BIO			*bio;
@@ -51,8 +49,8 @@ extern void	drop_init(Drop d, struct _perfer *perfer);
 extern void	drop_cleanup(Drop d);
 extern int	drop_pending(Drop d);
 
-extern int	drop_connect(Drop d, struct addrinfo *res);
-extern bool	drop_send(Drop d, struct _pool *p);
-extern bool	drop_recv(Drop d, struct _pool *p);
+extern int	drop_connect(Drop d);
+extern int	drop_send(Drop d);
+extern int	drop_recv(Drop d);
 
 #endif /* PERFER_DROP_H */
