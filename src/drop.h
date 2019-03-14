@@ -3,6 +3,7 @@
 #ifndef PERFER_DROP_H
 #define PERFER_DROP_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <poll.h>
 #ifdef WITH_OPENSSL
@@ -20,7 +21,7 @@ struct _pool;
 struct addrinfo;
 
 typedef struct _drop {
-    struct _perfer	*h; // for addr and request body
+    struct _perfer	*perfer; // for addr and request body
     int			sock;
     struct pollfd	*pp;
 #ifdef WITH_OPENSSL
@@ -29,26 +30,29 @@ typedef struct _drop {
     double		pipeline[PIPELINE_SIZE];
     int			phead;
     int			ptail;
+    volatile bool	queued; // only used by the queue
 
-    long		con_cnt;
-    long		sent_cnt;
-    long		err_cnt;
-    long		ok_cnt;
-    double		lat_sum;
-    double		lat_sq_sum;
-    double		actual_end;
+    atomic_long		sent_cnt;
+    volatile long	con_cnt;
+    volatile long	err_cnt;
+    volatile long	ok_cnt;
+    volatile double	lat_sum;
+    volatile double	lat_sq_sum;
+    volatile double	start_time;
+    volatile double	end_time;
+    volatile bool	finished;
 
     long		rcnt;    // recv count
     long		xsize;   // expected size of message
     char		buf[MAX_RESP_SIZE];
 } *Drop;
 
-extern void	drop_init(Drop d, struct _perfer *h);
+extern void	drop_init(Drop d, struct _perfer *perfer);
 extern void	drop_cleanup(Drop d);
 extern int	drop_pending(Drop d);
 
-extern int	drop_connect(Drop d, struct _pool *p, struct addrinfo *res);
+extern int	drop_connect(Drop d, struct addrinfo *res);
 extern bool	drop_send(Drop d, struct _pool *p);
-extern bool	drop_recv(Drop d, struct _pool *p, bool enough);
+extern bool	drop_recv(Drop d, struct _pool *p);
 
 #endif /* PERFER_DROP_H */

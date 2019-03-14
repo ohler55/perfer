@@ -19,12 +19,14 @@ typedef struct _header {
 typedef struct _perfer {
     bool		inited;
     volatile bool	done;
+    volatile bool	enough;
     struct _queue	q;
     struct _drop	*drops;
 
     struct _pool	*pools;
     long		tcnt;
     long		ccnt;
+    long		num;
     const char		*url;
     const char		*addr;
     const char		*port;
@@ -45,6 +47,7 @@ typedef struct _perfer {
     atomic_int		ready_cnt;
     atomic_int		seq;
     Header		headers;
+
     pthread_mutex_t	print_mutex;
 } *Perfer;
 

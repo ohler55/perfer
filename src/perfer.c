@@ -2,12 +2,20 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <math.h>
+#include <netdb.h>
+#include <netinet/tcp.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #ifdef WITH_OPENSSL
 #include <openssl/bio.h>
@@ -17,6 +25,7 @@
 
 #include "arg.h"
 #include "drop.h"
+#include "dtime.h"
 #include "pool.h"
 #include "perfer.h"
 
@@ -51,6 +60,7 @@ static struct _perfer	perfer = {
     .post = NULL,
     .tcnt = 1,
     .ccnt = 1,
+    .num = 0,
     .duration = 1.0,
     .start_time = 0.0,
     .ready_cnt = 0,
@@ -222,7 +232,6 @@ perfer_init(Perfer p, int argc, const char **argv) {
     const char	*opt_val = NULL;
     char	*end;
     int		cnt;
-    long	num = 0;
 
     if (0 != pthread_mutex_init(&p->print_mutex, 0)) {
 	printf("%s\n", strerror(errno));
@@ -280,8 +289,8 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    break;
 	case 1:
 	case 2:
-	    num = strtol(opt_val, &end, 10);
-	    if ('\0' != *end || 0 >= num) {
+	    p->num = strtol(opt_val, &end, 10);
+	    if ('\0' != *end || 0 >= p->num) {
 		printf("'%s' is not a valid number.\n", opt_val);
 		help(app_name);
 		return -1;
@@ -488,10 +497,8 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	printf("-*-*- Failed to allocate %ld threads.\n", p->tcnt);
 	return -1;
     }
-    Pool	pool;
+    Drop	d;
     int		i;
-    int		err;
-    long	n = num / p->tcnt;
 
     if (!p->keep_alive) {
 	p->backlog = 1;
@@ -503,10 +510,13 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	OpenSSL_add_all_algorithms();
     }
 #endif
-    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
-	if (0 != (err = pool_init(pool, p, n))) {
-	    return err;
-	}
+    if (NULL == (p->drops = (Drop)calloc(p->ccnt + 1, sizeof(struct _drop)))) {
+	printf("-*-*- Failed to allocate memory for connections.\n");
+	return -1;
+    }
+    for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
+	// TBD pass in response size after a probe to the target
+	drop_init(d, p);
     }
     return 0;
 }
@@ -517,11 +527,11 @@ perfer_cleanup(Perfer p) {
 	return;
     }
     p->inited = false;
-    Pool	pool;
+    Drop	d;
     int		i;
 
-    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
-	pool_cleanup(pool);
+    for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
+	drop_cleanup(d);
     }
     free(p->drops);
     queue_cleanup(&p->q);
@@ -551,22 +561,22 @@ print_out(Perfer p, Results r) {
 	printf("%s did not respond to %ld requests.\n", p->addr, r->sent_cnt - r->ok_cnt - r->err_cnt);
     }
     printf("Benchmarks for:\n");
-    printf("  URL:                %s://%s:%s/%s\n",
+    printf("  URL:          %s://%s:%s/%s\n",
 	   p->tls ? "https" : "http",
 	   p->addr,
 	   (NULL == p->port) ? "80" : p->port,
 	   NULL == p->path ? "" : p->path);
-    printf("  Threads:            %ld\n", p->tcnt);
-    printf("  Connections/thread: %ld\n", p->ccnt);
-    printf("  Duration:           %0.1f seconds\n", r->psum / p->tcnt);
-    printf("  Keep-Alive:         %s\n", p->keep_alive ? "true" : "false");
+    printf("  Threads:      %ld\n", p->tcnt);
+    printf("  Connections:  %ld\n", p->ccnt);
+    printf("  Duration:     %0.1f seconds\n", r->psum);
+    printf("  Keep-Alive:   %s\n", p->keep_alive ? "true" : "false");
     printf("Results:\n");
     if (0 < r->err_cnt) {
-	printf("  Failures:           %ld\n", r->err_cnt);
+	printf("  Failures:     %ld\n", r->err_cnt);
     }
-    printf("  Connections:        %ld connection established\n", (long)r->con_cnt);
-    printf("  Throughput:         %ld requests/second\n", (long)r->rate);
-    printf("  Latency:            %0.3f +/-%0.3f msecs (and stdev)\n", r->lat, r->stdev);
+    printf("  Connections:  %ld connection established\n", (long)r->con_cnt);
+    printf("  Throughput:   %ld requests/second\n", (long)r->rate);
+    printf("  Latency:      %0.3f +/-%0.3f msecs (and stdev)\n", r->lat, r->stdev);
 }
 
 static void
@@ -601,34 +611,172 @@ json_out(Perfer p, Results r) {
     printf("}\n");
 }
 
+// Returns addrinfo for a host[:port] string with the default port of 80.
+static struct addrinfo*
+get_addr_info(const char *host, const char *port) {
+    struct addrinfo	hints;
+    struct addrinfo	*res;
+    int			err;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = PF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (NULL == port) {
+	err = getaddrinfo(host, "80", &hints, &res);
+    } else {
+	err = getaddrinfo(host, port, &hints, &res);
+    }
+    if (0 != err) {
+	printf("*-*-* Failed to resolve %s.\n", host);
+	return NULL;
+    }
+    return res;
+}
+
+// TBD get rid of this
+#define START_DELAY	0.5
+
+static void*
+poll_loop(void *x) {
+    Perfer		p = (Perfer)x;
+    struct pollfd	ps[p->ccnt];
+    struct pollfd	*pp;
+    struct addrinfo	*res = get_addr_info(p->addr, p->port);
+    Drop		d;
+    int			i;
+    int			dcnt = p->ccnt;
+    int			pending;
+    int			pt = p->poll_timeout;
+    double		end_time = dtime() + p->duration + START_DELAY;
+    double		now;
+    long		sent_cnt;
+
+    while (!p->done) {
+	now = dtime();
+	if (p->enough) {
+	    bool	done = true;
+
+	    for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
+		if (0 < drop_pending(d)) {
+		    done = false;
+		    break;
+		}
+	    }
+	    if (done) {
+		p->done = true;
+		for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
+		    drop_cleanup(d);
+		}
+		break;
+	    }
+	} else {
+	    if (end_time <= now) {
+		p->enough = true;
+	    }
+	}
+	sent_cnt = 0;
+	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
+	    sent_cnt += atomic_load(&d->sent_cnt);
+	    if (0 == d->sock && !p->enough) {
+		if (drop_connect(d, res)) {
+		    // Failed to connect. Abort the test.
+		    perfer_stop(p);
+		    return NULL;
+		}
+		d->con_cnt++;
+	    }
+	    if (0 < d->sock) {
+		pp->fd = d->sock;
+		d->pp = pp;
+		pending = drop_pending(d);
+		if (0 < pending) {
+		    pp->events = POLLERR | POLLIN;
+		} else if (!p->enough) {
+		    pp->events = POLLERR;
+		}
+		pp->revents = 0;
+		pp++;
+	    }
+	}
+	if (0 < p->num && p->num <= sent_cnt) {
+	    p->enough = true;
+	}
+	if (0 > (i = poll(ps, pp - ps, pt))) {
+	    if (EAGAIN == errno) {
+		continue;
+	    }
+	    printf("*-*-* polling error: %s\n", strerror(errno));
+	    break;
+	}
+	if (0 == i) {
+	    continue;
+	}
+	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
+	    if (NULL == d->pp || 0 == d->pp->revents || 0 == d->sock) {
+		continue;
+	    }
+	    if (0 != (d->pp->revents & POLLERR)) {
+		d->err_cnt++;
+		drop_cleanup(d);
+	    }
+	    if (0 != (d->pp->revents & POLLIN)) {
+		queue_push(&p->q, d);
+	    }
+	}
+    }
+    return NULL;
+}
+
 static int
 perfer_start(Perfer p) {
-    Pool		pool;
     int			i;
     int			err;
     struct _results	r;
+    pthread_t		poll_thread;
+    struct _pool	pools[p->tcnt];
+    Pool		pool;
+    Drop		d;
+    int			tcnt = 0;
 
     memset(&r, 0, sizeof(r));
-    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
-	if (0 != (err = pool_start(pool))) {
+
+    if (0 != pthread_create(&poll_thread, NULL, poll_loop, p)) {
+	printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
+	return errno;
+    }
+    for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
+	if (0 != (err = pool_start(pool, p))) {
+	    printf("*-*-* Failed to create IO threads. %s\n", strerror(err));
 	    perfer_stop(p);
 	    return err;
 	}
     }
-    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
+    dsleep(START_DELAY);
+    for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
+	queue_push(&p->q, d);
+    }
+    for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
 	pool_wait(pool);
-	r.con_cnt += pool->con_cnt;
-	r.sent_cnt += pool->sent_cnt;
-	r.ok_cnt += pool->ok_cnt;
-	r.err_cnt += pool->err_cnt;
-	r.lat_sum += pool->lat_sum;
-	r.psum += pool->actual_end - p->start_time;
-	r.stdev += pool->lat_sq_sum;
     }
-    // TBD actual times for each thread
+    for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
+	r.con_cnt += d->con_cnt;
+	r.sent_cnt += atomic_load(&d->sent_cnt);
+	r.ok_cnt += d->ok_cnt;
+	r.err_cnt += d->err_cnt;
+	r.lat_sum += d->lat_sum;
+	if (0.0 < d->start_time) {
+	    r.psum += d->end_time - d->start_time;
+	    tcnt++;
+	}
+	r.stdev += d->lat_sq_sum;
+    }
+    // TBD better average over drops
+
     if (0.0 < r.psum) {
-	r.rate = (double)r.ok_cnt / (r.psum / p->tcnt);
+	r.psum /= tcnt;
+	r.rate = (double)r.ok_cnt / r.psum;
     }
+    printf("*** r.ok_cnt: %ld  dt %f\n", r.ok_cnt, r.psum);
     if (0 < r.ok_cnt) {
 	r.lat = r.lat_sum * 1000.0 / r.ok_cnt;
 	r.stdev /= (double)r.ok_cnt;

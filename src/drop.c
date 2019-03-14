@@ -20,15 +20,19 @@ static const char	content_length[] = "Content-Length:";
 static const char	transfer_encoding[] = "Transfer-Encoding:";
 
 void
-drop_init(Drop d, struct _perfer *h) {
+drop_init(Drop d, struct _perfer *perfer) {
     memset(d, 0, sizeof(struct _drop));
-    d->h = h;
+    d->perfer = perfer;
+    atomic_init(&d->sent_cnt, 0);
 }
 
 void
 drop_cleanup(Drop d) {
     if (0 != d->sock) {
 	close(d->sock);
+    }
+    if (d->perfer->enough && 0 != d->sock) {
+	d->end_time = dtime();
     }
     d->sock = 0;
     d->pp = NULL;
@@ -54,7 +58,7 @@ drop_pending(Drop d) {
 }
 
 static int
-drop_connect_normal(Drop d, Pool p, struct addrinfo *res) {
+drop_connect_normal(Drop d, struct addrinfo *res) {
     int	optval = 1;
     int	flags;
 
@@ -62,9 +66,9 @@ drop_connect_normal(Drop d, Pool p, struct addrinfo *res) {
 	0 > setsockopt(d->sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval)) ||
 	0 > connect(d->sock, res->ai_addr, res->ai_addrlen)) {
 	printf("*-*-* error opening socket: %s\n", strerror(errno));
-	p->err_cnt++;
-	p->finished = true;
-	p->actual_end = dtime();
+	d->err_cnt++;
+	d->finished = true;
+	d->end_time = dtime();
 	return errno;
     }
     flags = fcntl(d->sock, F_GETFL, 0);
@@ -75,7 +79,7 @@ drop_connect_normal(Drop d, Pool p, struct addrinfo *res) {
 }
 
 static int
-drop_connect_tls(Drop d, Pool p, struct addrinfo *res) {
+drop_connect_tls(Drop d, struct addrinfo *res) {
 
     // TBD
 
@@ -84,23 +88,30 @@ drop_connect_tls(Drop d, Pool p, struct addrinfo *res) {
 
 // Return non-zero on error.
 int
-drop_connect(Drop d, Pool p, struct addrinfo *res) {
-    if (p->perfer->tls) {
-	return drop_connect_tls(d, p, res);
+drop_connect(Drop d, struct addrinfo *res) {
+    if (d->perfer->tls) {
+	return drop_connect_tls(d, res);
     }
-    return drop_connect_normal(d, p, res);
+    return drop_connect_normal(d, res);
 }
 
 bool
 drop_send(Drop d, Pool p) {
-    if (d->h->backlog <= drop_pending(d)) {
+    // TBD mutex protect connecting
+    if (0 == d->sock) {
+	//drop_connect(d, struct addrinfo *res) {
+    }
+    if (d->perfer->backlog <= drop_pending(d)) {
 	return false;
     }
-    struct _perfer	*perf = d->h;
+    struct _perfer	*perf = d->perfer;
     int			scnt;
 
+    if (d->start_time <= 0.0) {
+	d->start_time = dtime();
+    }
     // TBD allow partial sends by checking return
-    if (d->h->replace) {
+    if (d->perfer->replace) {
 	char	body[16384];
 	char	seq_buf[16];
 	char	*s = perf->req_body;
@@ -123,11 +134,11 @@ drop_send(Drop d, Pool p) {
     }
     if (perf->req_len != scnt) {
 	//printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
-	p->err_cnt++;
+	d->err_cnt++;
 	drop_cleanup(d);
 	return true;
     }
-    p->sent_cnt++;
+    atomic_fetch_add(&d->sent_cnt, 1);
     d->pipeline[d->ptail] = dtime();
     d->ptail++;
     if (PIPELINE_SIZE <= d->ptail) {
@@ -137,10 +148,13 @@ drop_send(Drop d, Pool p) {
 }
 
 bool
-drop_recv(Drop d, Pool p, bool enough) {
+drop_recv(Drop d, Pool p) {
     ssize_t	rcnt;
     long	hsize = 0;
 
+    if (0 == d->sock) {
+	return false;
+    }
     if (0 > (rcnt = recv(d->sock, d->buf + d->rcnt, sizeof(d->buf) - d->rcnt - 1, 0))) {
 	if (EAGAIN == errno) {
 	    return false;
@@ -194,33 +208,34 @@ drop_recv(Drop d, Pool p, bool enough) {
 	    double	ave;
 	    double	dif;
 
-	    p->ok_cnt++;
+	    d->ok_cnt++;
 	    d->pipeline[d->phead] = 0.0;
 	    d->phead++;
 	    if (PIPELINE_SIZE <= d->phead) {
 		d->phead = 0;
 	    }
-	    p->lat_sum += dt;
-	    if (0 < p->ok_cnt) {
-		ave = p->lat_sum / (double)p->ok_cnt;
+	    d->lat_sum += dt;
+	    if (0 < d->ok_cnt) {
+		ave = d->lat_sum / (double)d->ok_cnt;
 		dif = dt - ave;
-		p->lat_sq_sum += dif * dif;
+		d->lat_sq_sum += dif * dif;
 	    }
 	    /* TBD debugging, uses something better than a simple average for latency analysis.
 	       if (0.01 < dt && p->lat_sum * 2.0 / p->ok_cnt < dt) {
 	       printf("*** long latency: %0.3f msecs\n", dt * 1000.0);
 	       }
 	    */
-	    if (d->h->verbose) {
+	    if (d->perfer->verbose) {
 		char	save = d->buf[d->xsize];
 
 		d->buf[d->xsize] = '\0';
 		pthread_mutex_lock(&p->perfer->print_mutex);
-		printf("\n%ld %ld %ld --------------------------------------------------------------------------------\n%s\n", d->xsize, d->rcnt, hsize, d->buf);
+		printf("\n%ld %ld %ld --------------------------------------------------------------------------------\n%s\n",
+		       d->xsize, d->rcnt, hsize, d->buf);
 		pthread_mutex_unlock(&p->perfer->print_mutex);
 		d->buf[d->xsize] = save;
 	    }
-	    if ((enough || !d->h->keep_alive) && 0 >= drop_pending(d) ) {
+	    if ((d->perfer->enough || !d->perfer->keep_alive) && 0 >= drop_pending(d) ) {
 		drop_cleanup(d);
 		return true;
 	    } else {
