@@ -51,7 +51,7 @@ loop(void *x) {
 	return NULL;
     }
     while (!h->done) {
-	if (NULL == (d = queue_pop(&h->q, 0.00001))) {
+	if (NULL == (d = queue_pop(&h->q, 0.1))) {
 	    continue;
 	}
 	if (drop_recv(d, p)) {
