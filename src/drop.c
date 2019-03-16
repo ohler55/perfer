@@ -174,7 +174,7 @@ drop_recv(Drop d) {
 	    drop_cleanup(d);
 	    d->err_cnt++;
 	}
-	//printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
+	printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
 	return errno;
     }
     d->rcnt += rcnt;

@@ -48,10 +48,6 @@ queue_push(Queue q, Drop item) {
     while (atomic_flag_test_and_set(&q->push_lock)) {
 	dsleep(RETRY_SECS);
     }
-    if (item->queued) {
-	atomic_flag_clear(&q->push_lock);
-	return;
-    }
     // Wait for head to move on.
     while (atomic_load(&q->head) == atomic_load(&q->tail)) {
 	dsleep(RETRY_SECS);
@@ -62,7 +58,6 @@ queue_push(Queue q, Drop item) {
     if (q->end <= tail) {
 	tail = q->q;
     }
-    item->queued = true;
     atomic_store(&q->tail, tail);
     atomic_flag_clear(&q->push_lock);
 }
@@ -79,7 +74,6 @@ queue_pop(Queue q, double timeout) {
     item = *(Drop*)atomic_load(&q->head);
 
     if (NULL != item) {
-	item->queued = false;
 	*(Drop*)atomic_load(&q->head) = NULL;
 	atomic_flag_clear(&q->pop_lock);
 
@@ -100,9 +94,6 @@ queue_pop(Queue q, double timeout) {
     }
     atomic_store(&q->head, next);
     item = *next;
-    if (NULL != item) {
-	item->queued = false;
-    }
     *next = NULL;
     atomic_flag_clear(&q->pop_lock);
 

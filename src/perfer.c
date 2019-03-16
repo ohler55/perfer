@@ -644,7 +644,6 @@ poll_loop(void *x) {
     Drop		d;
     int			i;
     int			dcnt = p->ccnt;
-    int			pending;
     int			pt = p->poll_timeout;
     double		end_time = dtime() + p->duration;
     double		now;
@@ -679,20 +678,19 @@ poll_loop(void *x) {
 		sent_cnt += atomic_load(&d->sent_cnt);
 	    }
 	    if (0 == d->sock && !p->enough) {
-		queue_push(&p->q, d);
+		if (!atomic_flag_test_and_set(&d->queued)) {
+		    queue_push(&p->q, d);
+		}
 		continue;
 	    }
 	    if (0 < d->sock) {
-		pp->fd = d->sock;
-		d->pp = pp;
-		pending = drop_pending(d);
-		if (0 < pending) {
+		if (0 < drop_pending(d)) {
+		    pp->fd = d->sock;
+		    d->pp = pp;
 		    pp->events = POLLERR | POLLIN;
-		} else if (!p->enough) {
-		    pp->events = POLLERR;
+		    pp->revents = 0;
+		    pp++;
 		}
-		pp->revents = 0;
-		pp++;
 	    }
 	}
 	if (0 < p->num && p->num <= sent_cnt) {
@@ -717,7 +715,9 @@ poll_loop(void *x) {
 		drop_cleanup(d);
 	    }
 	    if (0 != (d->pp->revents & POLLIN)) {
-		queue_push(&p->q, d);
+		if (!atomic_flag_test_and_set(&d->queued)) {
+		    queue_push(&p->q, d);
+		}
 	    }
 	}
     }
@@ -777,6 +777,8 @@ perfer_start(Perfer p) {
     } else {
 	print_out(p, &r);
     }
+    perfer_cleanup(p);
+
     return 0;
 }
 

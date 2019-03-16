@@ -26,9 +26,9 @@ typedef struct _drop {
     BIO			*bio;
 #endif
     double		pipeline[PIPELINE_SIZE];
-    int			phead;
-    int			ptail;
-    volatile bool	queued; // only used by the queue
+    volatile int	phead;
+    volatile int	ptail;
+    atomic_flag		queued;
 
     atomic_long		sent_cnt;
     volatile long	con_cnt;
