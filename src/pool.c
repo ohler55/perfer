@@ -22,6 +22,7 @@ loop(void *x) {
 	if (NULL == (d = queue_pop(&h->q, 0.1))) {
 	    continue;
 	}
+#if 1
 	if (0 == drop_recv(d)) {
 	    while (drop_pending(d) < h->backlog && !h->enough) {
 		if (0 != (err = drop_send(d))) {
@@ -32,6 +33,17 @@ loop(void *x) {
 		}
 	    }
 	}
+#else
+	while (drop_pending(d) < h->backlog && !h->enough) {
+	    if (0 != (err = drop_send(d))) {
+		if (EAGAIN == err) {
+		    queue_push(&h->q, d);
+		}
+		break;
+	    }
+	}
+	drop_recv(d);
+#endif
 	atomic_flag_clear(&d->queued);
     }
     p->finished = true;

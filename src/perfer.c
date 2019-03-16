@@ -778,7 +778,6 @@ perfer_start(Perfer p) {
 	print_out(p, &r);
     }
     perfer_cleanup(p);
-
     return 0;
 }
 
