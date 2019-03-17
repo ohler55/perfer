@@ -13,37 +13,17 @@
 
 static void*
 loop(void *x) {
-    Pool		p = (Pool)x;
-    Perfer		h = p->perfer;
-    Drop		d;
-    int			err;
+    Pool	p = (Pool)x;
+    Perfer	perf = p->perfer;
+    Drop	d;
 
-    while (!h->done) {
-	if (NULL == (d = queue_pop(&h->q, 0.1))) {
+    while (!perf->done) {
+	if (NULL == (d = queue_pop(&perf->q, 0.1))) {
 	    continue;
 	}
-#if 1
-	if (0 == drop_recv(d)) {
-	    while (drop_pending(d) < h->backlog && !h->enough) {
-		if (0 != (err = drop_send(d))) {
-		    if (EAGAIN == err) {
-			queue_push(&h->q, d);
-		    }
-		    break;
-		}
-	    }
+	if (EAGAIN == drop_process(d)) {
+	    queue_push(&perf->q, d);
 	}
-#else
-	while (drop_pending(d) < h->backlog && !h->enough) {
-	    if (0 != (err = drop_send(d))) {
-		if (EAGAIN == err) {
-		    queue_push(&h->q, d);
-		}
-		break;
-	    }
-	}
-	drop_recv(d);
-#endif
 	atomic_flag_clear(&d->queued);
     }
     p->finished = true;

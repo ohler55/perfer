@@ -25,9 +25,9 @@ typedef struct _drop {
 #ifdef WITH_OPENSSL
     BIO			*bio;
 #endif
-    double		pipeline[PIPELINE_SIZE];
-    volatile int	phead;
-    volatile int	ptail;
+    // TBD change to nanoseconds
+    volatile double	sent_time;
+    volatile double	current_time; // sent time for the current read
     atomic_flag		queued;
 
     atomic_long		sent_cnt;
@@ -38,8 +38,8 @@ typedef struct _drop {
     volatile double	lat_sq_sum;
     volatile double	start_time;
     volatile double	end_time;
-    volatile bool	finished;
 
+    volatile bool	finished;
     long		rcnt;    // recv count
     long		xsize;   // expected size of message
     char		buf[MAX_RESP_SIZE];
@@ -50,7 +50,6 @@ extern void	drop_cleanup(Drop d);
 extern int	drop_pending(Drop d);
 
 extern int	drop_connect(Drop d);
-extern int	drop_send(Drop d);
-extern int	drop_recv(Drop d);
+extern int	drop_process(Drop d);
 
 #endif /* PERFER_DROP_H */
