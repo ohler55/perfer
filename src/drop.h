@@ -12,9 +12,12 @@
 #include <openssl/err.h>
 #endif
 
-#define MAX_RESP_SIZE	16384
+#define MAX_RESP_SIZE	4096
+//#define MAX_RESP_SIZE	16384
 //#define MAX_RESP_SIZE	64000
 #define PIPELINE_SIZE	16
+
+typedef atomic_int_fast64_t	atime;
 
 struct _perfer;
 
@@ -25,19 +28,19 @@ typedef struct _drop {
 #ifdef WITH_OPENSSL
     BIO			*bio;
 #endif
-    // TBD change to nanoseconds
-    volatile double	sent_time;
-    volatile double	current_time; // sent time for the current read
     atomic_flag		queued;
+    atime		sent_time;
+    atime		recv_time;
+    volatile int64_t	current_time; // sent time for the current read
 
-    atomic_long		sent_cnt;
+    volatile long	sent_cnt;
     volatile long	con_cnt;
     volatile long	err_cnt;
     volatile long	ok_cnt;
     volatile double	lat_sum;
     volatile double	lat_sq_sum;
-    volatile double	start_time;
-    volatile double	end_time;
+    volatile int64_t	start_time;
+    volatile int64_t	end_time;
 
     volatile bool	finished;
     long		rcnt;    // recv count

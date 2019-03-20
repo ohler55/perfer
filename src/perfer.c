@@ -63,7 +63,6 @@ static struct _perfer	perfer = {
     .ccnt = 1,
     .num = 0,
     .duration = 1.0,
-    .start_time = 0.0,
     .ready_cnt = 0,
     .seq = 0,
     .req_file = NULL,
@@ -600,6 +599,7 @@ print_out(Perfer p, Results r) {
 	printf("  Failures:     %ld\n", r->err_cnt);
     }
     printf("  Connections:  %ld connection established\n", (long)r->con_cnt);
+    printf("  Requests:     %ld requests\n", (long)r->ok_cnt);
     printf("  Throughput:   %ld requests/second\n", (long)r->rate);
     printf("  Latency:      %0.3f +/-%0.3f msecs (and stdev)\n", r->lat, r->stdev);
 }
@@ -629,6 +629,7 @@ json_out(Perfer p, Results r) {
 	printf("    \"noResponse\": %ld,\n", r->sent_cnt - r->ok_cnt - r->err_cnt);
     }
     printf("    \"connections\": %ld,\n", (long)r->con_cnt);
+    printf("    \"requests\": %ld,\n", (long)r->ok_cnt);
     printf("    \"requestsPerSecond\": %ld,\n", (long)r->rate);
     printf("    \"latencyMilliseconds\": %0.3f,\n", r->lat);
     printf("    \"latencyStdev\": %0.3f\n", r->stdev);
@@ -647,7 +648,7 @@ poll_loop(void *x) {
     int			pt = p->poll_timeout;
     double		end_time = dtime() + p->duration;
     double		now;
-    long		sent_cnt;
+    int			err;
 
     while (!p->done) {
 	now = dtime();
@@ -667,34 +668,41 @@ poll_loop(void *x) {
 		}
 		break;
 	    }
-	} else {
-	    if (end_time <= now) {
-		p->enough = true;
-	    }
+	} else if (end_time <= now) {
+	    p->enough = true;
 	}
-	sent_cnt = 0;
 	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
-	    if (0 < p->num) {
-		sent_cnt += atomic_load(&d->sent_cnt);
-	    }
-	    if (0 == d->sock && !p->enough) {
-		if (!atomic_flag_test_and_set(&d->queued)) {
-		    queue_push(&p->q, d);
+	    if (!p->enough) {
+		if (0 == d->sock) {
+		    if (0 != (err = drop_connect(d))) {
+			// Failed to connect. Abort the test.
+			perfer_stop(p);
+			return NULL;
+		    }
 		}
-		continue;
+		if (0 == atomic_load(&d->sent_time)) {
+		    int	scnt = send(d->sock, p->req_body, p->req_len, 0);
+
+		    if (p->req_len != scnt) {
+			printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
+			d->err_cnt++;
+			drop_cleanup(d);
+			continue;
+		    }
+		    if (0 == d->start_time) {
+			d->start_time = ntime();
+		    }
+		    d->sent_cnt++;
+		    atomic_store(&d->sent_time, ntime());
+		}
 	    }
 	    if (0 < d->sock) {
-		if (0 < drop_pending(d)) {
-		    pp->fd = d->sock;
-		    d->pp = pp;
-		    pp->events = POLLERR | POLLIN;
-		    pp->revents = 0;
-		    pp++;
-		}
+		pp->fd = d->sock;
+		d->pp = pp;
+		pp->events = POLLERR | POLLIN;
+		pp->revents = 0;
+		pp++;
 	    }
-	}
-	if (0 < p->num && p->num <= sent_cnt) {
-	    p->enough = true;
 	}
 	if (0 > (i = poll(ps, pp - ps, pt))) {
 	    if (EAGAIN == errno) {
@@ -716,6 +724,7 @@ poll_loop(void *x) {
 	    }
 	    if (0 != (d->pp->revents & POLLIN)) {
 		if (!atomic_flag_test_and_set(&d->queued)) {
+		    atomic_store(&d->recv_time, ntime());
 		    queue_push(&p->q, d);
 		}
 	    }
@@ -758,7 +767,7 @@ perfer_start(Perfer p) {
 	r.err_cnt += d->err_cnt;
 	r.lat_sum += d->lat_sum;
 	if (0.0 < d->start_time) {
-	    r.psum += d->end_time - d->start_time;
+	    r.psum += (double)(d->end_time - d->start_time) / 1000000000.0;
 	    tcnt++;
 	}
 	r.stdev += d->lat_sq_sum;
@@ -777,7 +786,7 @@ perfer_start(Perfer p) {
     } else {
 	print_out(p, &r);
     }
-    perfer_cleanup(p);
+    //perfer_cleanup(p);
     return 0;
 }
 

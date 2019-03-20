@@ -3,8 +3,12 @@
 #ifndef PERFER_DTIME_H
 #define PERFER_DTIME_H
 
+#include <stdint.h>
+
 extern double	dtime(void);
 extern double	dsleep(double t);
 extern double	dwait(double t);
+
+extern int64_t	ntime();
 
 #endif /* PERFER_DTIME_H */

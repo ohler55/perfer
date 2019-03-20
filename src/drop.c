@@ -23,7 +23,8 @@ void
 drop_init(Drop d, struct _perfer *perfer) {
     memset(d, 0, sizeof(struct _drop));
     d->perfer = perfer;
-    atomic_init(&d->sent_cnt, 0);
+    atomic_init(&d->sent_time, 0);
+    atomic_init(&d->recv_time, 0);
 }
 
 void
@@ -43,7 +44,7 @@ drop_cleanup(Drop d) {
 
 int
 drop_pending(Drop d) {
-    return 0.0 < d->sent_time || 0.0 < d->current_time;
+    return 0 < atomic_load(&d->sent_time) || 0 < d->current_time;
 }
 
 static int
@@ -57,7 +58,7 @@ drop_connect_normal(Drop d) {
 	printf("*-*-* error opening socket: %s\n", strerror(errno));
 	d->err_cnt++;
 	d->finished = true;
-	d->end_time = dtime();
+	d->end_time = ntime();
 	return errno;
     }
     flags = fcntl(d->sock, F_GETFL, 0);
@@ -95,37 +96,7 @@ drop_connect(Drop d) {
 
 int
 drop_process(Drop d) {
-    double	now = 0.0;
-    int		err;
-    Perfer	perf = d->perfer;
-
-    if (0.0 == d->sent_time && !perf->enough) {
-	if (0 == d->sock) {
-	    if (0 != (err = drop_connect(d))) {
-		// Failed to connect. Abort the test.
-		perfer_stop(perf);
-		return err;
-	    }
-	}
-	if (d->start_time <= 0.0) {
-	    d->start_time = dtime();
-	}
-	int	scnt = send(d->sock, perf->req_body, perf->req_len, 0);
-
-	if (perf->req_len != scnt) {
-	    printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
-	    d->err_cnt++;
-	    drop_cleanup(d);
-	    return errno;
-	}
-	now = dtime();
-	d->sent_time = now;
-	atomic_fetch_add(&d->sent_cnt, 1);
-    }
-    if (0.0 == now) {
-	now = dtime();
-    }
-    if (0.0 < d->current_time) {
+    if (0 < d->current_time) {
 	ssize_t	rcnt;
 	long	hsize = 0;
 
@@ -181,13 +152,14 @@ drop_process(Drop d) {
 		hsize = hend - d->buf;
 	    }
 	    if (d->xsize <= d->rcnt) {
-		double	dt = now - d->current_time;
+		int64_t	recv_time = atomic_load(&d->recv_time);
+		double	dt = (double)(recv_time - d->current_time) / 1000000000.0;
 		double	ave;
 		double	dif;
 
-		d->end_time = now;
-		d->current_time = d->sent_time;
-		d->sent_time= 0.0;
+		d->end_time = recv_time;
+		d->current_time = atomic_load(&d->sent_time);
+		atomic_store(&d->sent_time, 0);
 
 		d->ok_cnt++;
 		d->lat_sum += dt;
@@ -225,8 +197,8 @@ drop_process(Drop d) {
 	    }
 	}
     } else {
-	d->current_time = d->sent_time;
-	d->sent_time = 0.0;
+	d->current_time = atomic_load(&d->sent_time);
+	atomic_store(&d->sent_time, 0);
     }
     return 0;
 }

@@ -1,8 +1,8 @@
 // Copyright 2009, 2015, 2016, 2018 by Peter Ohler, All Rights Reserved
 
-#include <time.h>
-#include <sys/time.h>
 #include <errno.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "dtime.h"
 
@@ -19,6 +19,15 @@ dtime() {
     clock_gettime(CLOCK_REALTIME_COURSE, &ts);
 
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
+}
+
+int64_t
+ntime() {
+    struct timespec	ts;
+
+    clock_gettime(CLOCK_REALTIME_COURSE, &ts);
+
+    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
 }
 
 double

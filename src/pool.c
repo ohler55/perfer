@@ -18,7 +18,7 @@ loop(void *x) {
     Drop	d;
 
     while (!perf->done) {
-	if (NULL == (d = queue_pop(&perf->q, 0.1))) {
+	if (NULL == (d = queue_pop(&perf->q, 0.01))) {
 	    continue;
 	}
 	if (EAGAIN == drop_process(d)) {
