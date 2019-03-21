@@ -6,14 +6,15 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <poll.h>
+#include <pthread.h>
 #ifdef WITH_OPENSSL
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #endif
 
-#define MAX_RESP_SIZE	4096
-//#define MAX_RESP_SIZE	16384
+//#define MAX_RESP_SIZE	4096
+#define MAX_RESP_SIZE	16384
 //#define MAX_RESP_SIZE	64000
 #define PIPELINE_SIZE	16
 
@@ -32,6 +33,8 @@ typedef struct _drop {
     atime		sent_time;
     atime		recv_time;
     volatile int64_t	current_time; // sent time for the current read
+
+    pthread_mutex_t	moo;
 
     volatile long	sent_cnt;
     volatile long	con_cnt;
@@ -53,6 +56,6 @@ extern void	drop_cleanup(Drop d);
 extern int	drop_pending(Drop d);
 
 extern int	drop_connect(Drop d);
-extern int	drop_process(Drop d);
+extern int	drop_recv(Drop d);
 
 #endif /* PERFER_DROP_H */

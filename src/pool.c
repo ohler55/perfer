@@ -21,10 +21,7 @@ loop(void *x) {
 	if (NULL == (d = queue_pop(&perf->q, 0.01))) {
 	    continue;
 	}
-	if (EAGAIN == drop_process(d)) {
-	    queue_push(&perf->q, d);
-	}
-	atomic_flag_clear(&d->queued);
+	drop_recv(d);
     }
     p->finished = true;
 

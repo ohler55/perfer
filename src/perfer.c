@@ -646,12 +646,18 @@ poll_loop(void *x) {
     int			i;
     int			dcnt = p->ccnt;
     int			pt = p->poll_timeout;
-    double		end_time = dtime() + p->duration;
-    double		now;
     int			err;
 
+    // Initialize connections before starting the benchmarks.
+    for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
+	if (0 != (err = drop_connect(d))) {
+	    // Failed to connect. Abort the test.
+	    perfer_stop(p);
+	    return NULL;
+	}
+    }
+    dsleep(0.2);
     while (!p->done) {
-	now = dtime();
 	if (p->enough) {
 	    bool	done = true;
 
@@ -668,12 +674,10 @@ poll_loop(void *x) {
 		}
 		break;
 	    }
-	} else if (end_time <= now) {
-	    p->enough = true;
 	}
 	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
 	    if (!p->enough) {
-		if (0 == d->sock) {
+		if (false && 0 == d->sock) {
 		    if (0 != (err = drop_connect(d))) {
 			// Failed to connect. Abort the test.
 			perfer_stop(p);
@@ -757,12 +761,14 @@ perfer_start(Perfer p) {
 	    return err;
 	}
     }
+    dsleep(p->duration + 0.5); // A little extra to give the threads time to startup and connections to be made.
+    p->enough = true;
     for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
 	pool_wait(pool);
     }
     for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
 	r.con_cnt += d->con_cnt;
-	r.sent_cnt += atomic_load(&d->sent_cnt);
+	r.sent_cnt += d->sent_cnt;
 	r.ok_cnt += d->ok_cnt;
 	r.err_cnt += d->err_cnt;
 	r.lat_sum += d->lat_sum;
@@ -786,7 +792,8 @@ perfer_start(Perfer p) {
     } else {
 	print_out(p, &r);
     }
-    //perfer_cleanup(p);
+    perfer_cleanup(p);
+
     return 0;
 }
 

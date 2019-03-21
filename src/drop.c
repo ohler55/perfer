@@ -25,6 +25,7 @@ drop_init(Drop d, struct _perfer *perfer) {
     d->perfer = perfer;
     atomic_init(&d->sent_time, 0);
     atomic_init(&d->recv_time, 0);
+    pthread_mutex_init(&d->moo, 0);
 }
 
 void
@@ -52,20 +53,29 @@ drop_connect_normal(Drop d) {
     int	optval = 1;
     int	flags;
 
-    if (0 > (d->sock = socket(d->perfer->addr_info->ai_family, d->perfer->addr_info->ai_socktype, d->perfer->addr_info->ai_protocol)) ||
-	0 > setsockopt(d->sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval)) ||
-	0 > connect(d->sock, d->perfer->addr_info->ai_addr, d->perfer->addr_info->ai_addrlen)) {
+    if (0 > (d->sock = socket(d->perfer->addr_info->ai_family, d->perfer->addr_info->ai_socktype, d->perfer->addr_info->ai_protocol))) {
+	// TBD allow EINPROGRESS
 	printf("*-*-* error opening socket: %s\n", strerror(errno));
-	d->err_cnt++;
-	d->finished = true;
-	d->end_time = ntime();
-	return errno;
+	goto FAIL;
+    }
+    if (0 > setsockopt(d->sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval))) {
+	printf("*-*-* error setting socket option: %s\n", strerror(errno));
+	goto FAIL;
+    }
+    if (0 > connect(d->sock, d->perfer->addr_info->ai_addr, d->perfer->addr_info->ai_addrlen)) {
+	printf("*-*-* error connecting: %s\n", strerror(errno));
+	goto FAIL;
     }
     flags = fcntl(d->sock, F_GETFL, 0);
     fcntl(d->sock, F_SETFL, O_NONBLOCK | flags);
     d->rcnt = 0;
 
     return 0;
+FAIL:
+    d->err_cnt++;
+    d->finished = true;
+    d->end_time = ntime();
+    return errno;
 }
 
 static int
@@ -95,10 +105,11 @@ drop_connect(Drop d) {
 }
 
 int
-drop_process(Drop d) {
+drop_recv(Drop d) {
     if (0 < d->current_time) {
 	ssize_t	rcnt;
 	long	hsize = 0;
+	//char	start = d->buf;
 
 	if (0 == d->sock) {
 	    return 0;
@@ -109,8 +120,11 @@ drop_process(Drop d) {
 		d->err_cnt++;
 	    }
 	    //printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
+	    pthread_mutex_unlock(&d->moo);
 	    return errno;
 	}
+	// TBD should a longer backlog be used?
+
 	d->rcnt += rcnt;
 	//d->buf[d->rcnt] = '\0';
 	while (0 < d->rcnt) {
@@ -119,6 +133,8 @@ drop_process(Drop d) {
 		char	*cl = strstr(d->buf, content_length);
 
 		if (NULL == hend) {
+		    // TBD unlock
+		    pthread_mutex_unlock(&d->moo);
 		    return 0;
 		}
 		if (NULL == cl) {
@@ -153,21 +169,28 @@ drop_process(Drop d) {
 	    }
 	    if (d->xsize <= d->rcnt) {
 		int64_t	recv_time = atomic_load(&d->recv_time);
-		double	dt = (double)(recv_time - d->current_time) / 1000000000.0;
-		double	ave;
-		double	dif;
 
+		d->ok_cnt++;
+		if (0 == d->current_time) {
+		    if (0 < d->ok_cnt) {
+			d->lat_sum = d->lat_sum * (double)(d->ok_cnt + 1) / (double)d->ok_cnt;
+			d->lat_sq_sum = d->lat_sq_sum * (double)(d->ok_cnt + 1) / (double)d->ok_cnt;
+		    }
+		} else {
+		    double	dt = (double)(recv_time - d->current_time) / 1000000000.0;
+		    double	ave;
+		    double	dif;
+
+		    d->lat_sum += dt;
+		    if (0 < d->ok_cnt) {
+			ave = d->lat_sum / (double)d->ok_cnt;
+			dif = dt - ave;
+			d->lat_sq_sum += dif * dif;
+		    }
+		}
 		d->end_time = recv_time;
 		d->current_time = atomic_load(&d->sent_time);
 		atomic_store(&d->sent_time, 0);
-
-		d->ok_cnt++;
-		d->lat_sum += dt;
-		if (0 < d->ok_cnt) {
-		    ave = d->lat_sum / (double)d->ok_cnt;
-		    dif = dt - ave;
-		    d->lat_sq_sum += dif * dif;
-		}
 		if (d->perfer->verbose) {
 		    char	save = d->buf[d->xsize];
 
@@ -183,6 +206,7 @@ drop_process(Drop d) {
 		    return 0;
 		} else {
 		    if (d->xsize < d->rcnt) {
+			// TBD use pointer to head and only move when done
 			memmove(d->buf, d->buf + d->xsize, d->rcnt - d->xsize);
 			d->rcnt -= d->xsize;
 			d->xsize = 0;
@@ -200,5 +224,7 @@ drop_process(Drop d) {
 	d->current_time = atomic_load(&d->sent_time);
 	atomic_store(&d->sent_time, 0);
     }
+    atomic_flag_clear(&d->queued);
+
     return 0;
 }
