@@ -1,0 +1,29 @@
+;; -*- mode: outline; outline-regexp: " *[-\+]"; indent-tabs-mode: nil; fill-column: 120 -*-
+
+todo
+----
+
+- tighten up pipeline stuff
+
+- why do some not respond every once in a while?
+
+- include MB/sec
+
+- redo latency
+ - use staggered collection
+  - base 16
+  - starting with 256 nsecs as an array of 256 values
+  - next is 256 * 16 nsecs as an array of 256
+  - up 16 second what ever a reasonable top end is
+  - when a value arrives pick the correct stagger set then the slot in the set
+   - each slot has an atomic int and is a counter of the occurances at that latency
+ - calc mean as 50%
+ - output value at each percent in 10% increments until 90% then 95 and 99
+  - maybe allow marks to be specified
+ - option graph (kind of fun)
+
+- option for metered sends (example, use 1000 req/sec for latency normalization)
+ - -m --meter <req/sec>
+ - if metered, don't send from poll
+ - loop in start then loops through drops and sends until time is done
+  - for (t = start; true; t += rate) { dsleep for t - now }

@@ -677,14 +677,14 @@ poll_loop(void *x) {
 	}
 	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
 	    if (!p->enough) {
-		if (false && 0 == d->sock) {
+		if (0 == d->sock) {
 		    if (0 != (err = drop_connect(d))) {
 			// Failed to connect. Abort the test.
 			perfer_stop(p);
 			return NULL;
 		    }
 		}
-		if (0 == atomic_load(&d->sent_time)) {
+		if (drop_pending(d) < p->backlog) {
 		    int	scnt = send(d->sock, p->req_body, p->req_len, 0);
 
 		    if (p->req_len != scnt) {
@@ -697,7 +697,15 @@ poll_loop(void *x) {
 			d->start_time = ntime();
 		    }
 		    d->sent_cnt++;
-		    atomic_store(&d->sent_time, ntime());
+
+		    int	tail = atomic_load(&d->ptail);
+
+		    atomic_store(&d->pipeline[tail], ntime());
+		    tail++;
+		    if (PIPELINE_SIZE <= tail) {
+			tail = 0;
+		    }
+		    atomic_store(&d->ptail, tail);
 		}
 	    }
 	    if (0 < d->sock) {
