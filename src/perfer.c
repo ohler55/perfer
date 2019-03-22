@@ -46,6 +46,7 @@ typedef struct _results {
     double	lat;
     double	rate;
     double	stdev;
+    int64_t	bytes;
 } *Results;
 
 static struct _perfer	perfer = {
@@ -600,6 +601,7 @@ print_out(Perfer p, Results r) {
     }
     printf("  Connections:  %ld connection established\n", (long)r->con_cnt);
     printf("  Requests:     %ld requests\n", (long)r->ok_cnt);
+    printf("  Received:     %0.3f MB\n", (double)r->bytes / 1024.0 /1024.0);
     printf("  Throughput:   %ld requests/second\n", (long)r->rate);
     printf("  Latency:      %0.3f +/-%0.3f msecs (and stdev)\n", r->lat, r->stdev);
 }
@@ -633,6 +635,7 @@ json_out(Perfer p, Results r) {
     printf("    \"requestsPerSecond\": %ld,\n", (long)r->rate);
     printf("    \"latencyMilliseconds\": %0.3f,\n", r->lat);
     printf("    \"latencyStdev\": %0.3f\n", r->stdev);
+    printf("    \"TotalBytes\": %0.3f\n", (double)r->bytes / 1024.0 / 1024.0);
     printf("  }\n");
     printf("}\n");
 }
@@ -648,6 +651,7 @@ poll_loop(void *x) {
     int			pt = p->poll_timeout;
     int			err;
 
+    // TBD only connect is keep-alive
     // Initialize connections before starting the benchmarks.
     for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
 	if (0 != (err = drop_connect(d))) {
@@ -785,6 +789,7 @@ perfer_start(Perfer p) {
 	    tcnt++;
 	}
 	r.stdev += d->lat_sq_sum;
+	r.bytes += d->data_amount;
     }
     if (0.0 < r.psum) {
 	r.psum /= tcnt;

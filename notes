@@ -3,11 +3,7 @@
 todo
 ----
 
-- tighten up pipeline stuff
-
 - why do some not respond every once in a while?
-
-- include MB/sec
 
 - redo latency
  - use staggered collection

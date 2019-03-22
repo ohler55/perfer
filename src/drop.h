@@ -21,9 +21,9 @@ typedef atomic_int_fast64_t	atime;
 struct _perfer;
 
 typedef struct _drop {
-    struct _perfer	*perfer; // for addr and request body
     volatile int	sock;
     struct pollfd	*pp;
+    struct _perfer	*perfer; // for addr and request body
 #ifdef WITH_OPENSSL
     BIO			*bio;
 #endif
@@ -33,14 +33,16 @@ typedef struct _drop {
     atomic_int_fast8_t	phead;
     atomic_int_fast8_t	ptail;
 
-    volatile long	sent_cnt;
     volatile long	con_cnt;
+    volatile int64_t	data_amount;
     volatile long	err_cnt;
     volatile long	ok_cnt;
-    volatile double	lat_sum;
-    volatile double	lat_sq_sum;
     volatile int64_t	start_time;
     volatile int64_t	end_time;
+
+    volatile long	sent_cnt;
+    volatile double	lat_sum;
+    volatile double	lat_sq_sum;
 
     volatile bool	finished;
     long		rcnt;    // recv count

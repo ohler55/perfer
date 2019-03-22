@@ -135,6 +135,7 @@ drop_recv(Drop d) {
 	    d->err_cnt++;
 	}
 	//printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
+	atomic_flag_clear(&d->queued);
 	return errno;
     }
     d->rcnt += rcnt;
@@ -145,6 +146,7 @@ drop_recv(Drop d) {
 	    char	*cl = strstr(d->buf, content_length);
 
 	    if (NULL == hend) {
+		atomic_flag_clear(&d->queued);
 		return 0;
 	    }
 	    if (NULL == cl) {
@@ -168,6 +170,7 @@ drop_recv(Drop d) {
 		    printf("*-*-* error reading content length on %d.\n", d->sock);
 		    drop_cleanup(d);
 		    d->err_cnt++;
+		    atomic_flag_clear(&d->queued);
 		    return EIO;
 		}
 		d->xsize = hend - d->buf + 4 + len;
@@ -183,6 +186,7 @@ drop_recv(Drop d) {
 	    int64_t	current = atomic_load(&d->pipeline[head]);
 
 	    d->ok_cnt++;
+	    d->data_amount += d->xsize;
 	    if (0 == current) {
 		if (0 < d->ok_cnt) {
 		    d->lat_sum = d->lat_sum * (double)(d->ok_cnt + 1) / (double)d->ok_cnt;
@@ -220,6 +224,7 @@ drop_recv(Drop d) {
 	    }
 	    if ((d->perfer->enough || !d->perfer->keep_alive) && 0 >= drop_pending(d) ) {
 		drop_cleanup(d);
+		atomic_flag_clear(&d->queued);
 		return 0;
 	    } else {
 		if (d->xsize < d->rcnt) {
