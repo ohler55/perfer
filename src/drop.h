@@ -39,10 +39,7 @@ typedef struct _drop {
     volatile long	ok_cnt;
     volatile int64_t	start_time;
     volatile int64_t	end_time;
-
     volatile long	sent_cnt;
-    volatile double	lat_sum;
-    volatile double	lat_sq_sum;
 
     volatile bool	finished;
     long		rcnt;    // recv count

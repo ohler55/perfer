@@ -28,6 +28,7 @@
 #include "dtime.h"
 #include "pool.h"
 #include "perfer.h"
+#include "stagger.h"
 
 #ifndef OSX_OS
 // this is gnu
@@ -45,7 +46,6 @@ typedef struct _results {
     double	psum;
     double	lat;
     double	rate;
-    double	stdev;
     int64_t	bytes;
 } *Results;
 
@@ -260,6 +260,8 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	printf("%s\n", strerror(errno));
 	return -1;
     }
+    stagger_init();
+
     argv++;
     argc--;
     for (; 0 < argc; argc -= cnt, argv += cnt) {
@@ -578,6 +580,60 @@ perfer_stop(Perfer p) {
 }
 
 static void
+lat_graph(int w, int h) {
+    w++;
+    char	g[h * w];
+    char	*r;
+    int		i;
+
+    memset(g, ' ', sizeof(g));
+    for (r = g, i = 0; i < h; i++, r += w) {
+	r[w-1] = '\0';
+    }
+    char	sep[w];
+
+    memset(sep, '-', w - 1);
+    sep[w - 1] = '\0';
+
+    printf("\n");
+    printf("Latency Distribution\n");
+    printf("%s\n", sep);
+
+    uint64_t	lw = stagger_at(0.95); // width of latency
+    uint64_t	lh = 1;
+    uint64_t	vals[w];
+    uint64_t	linc = lw / w;
+    uint64_t	min;
+    uint64_t	v;
+    int		y;
+
+    for (i = 0; i < 16; i++) {
+	if (linc < (1ULL << (i * 4))) {
+	    break;
+	}
+    }
+    i--;
+    linc = 1ULL << (i * 4);
+    memset(vals, 0, sizeof(vals));
+    for (i = 0, min = 0; i < w - 1; i++, min += linc) {
+	v = stagger_range(min, min + linc);
+	vals[i] = v;
+	if (lh < v) {
+	    lh = v;
+	}
+    }
+    h--;
+    for (i = 0; i < w; i++) {
+	y = h - (int)(vals[i] * h / lh);
+	g[y * w + i] = '*';
+    }
+    for (r = g, i = 0; i < h; i++, r += w) {
+	printf("%s\n", r);
+    }
+    printf("%s\n\n", sep);
+}
+
+static void
 print_out(Perfer p, Results r) {
     if (0 < r->err_cnt) {
 	printf("%s encountered %ld errors.\n", p->addr, r->err_cnt);
@@ -586,24 +642,38 @@ print_out(Perfer p, Results r) {
 	printf("%s did not respond to %ld requests.\n", p->addr, r->sent_cnt - r->ok_cnt - r->err_cnt);
     }
     printf("Benchmarks for:\n");
-    printf("  URL:          %s://%s:%s/%s\n",
+    printf("  URL:             %s://%s:%s/%s\n",
 	   p->tls ? "https" : "http",
 	   p->addr,
 	   (NULL == p->port) ? "80" : p->port,
 	   NULL == p->path ? "" : p->path);
-    printf("  Threads:      %ld\n", p->tcnt);
-    printf("  Connections:  %ld\n", p->ccnt);
-    printf("  Duration:     %0.1f seconds\n", r->psum);
-    printf("  Keep-Alive:   %s\n", p->keep_alive ? "true" : "false");
+    printf("  Threads:         %ld\n", p->tcnt);
+    printf("  Connections:     %ld\n", p->ccnt);
+    printf("  Duration:        %0.1f seconds\n", r->psum);
+    printf("  Keep-Alive:      %s\n", p->keep_alive ? "true" : "false");
     printf("Results:\n");
     if (0 < r->err_cnt) {
-	printf("  Failures:     %ld\n", r->err_cnt);
+	printf("  Failures:        %ld\n", r->err_cnt);
     }
-    printf("  Connections:  %ld connection established\n", (long)r->con_cnt);
-    printf("  Requests:     %ld requests\n", (long)r->ok_cnt);
-    printf("  Received:     %0.3f MB\n", (double)r->bytes / 1024.0 /1024.0);
-    printf("  Throughput:   %ld requests/second\n", (long)r->rate);
-    printf("  Latency:      %0.3f +/-%0.3f msecs (and stdev)\n", r->lat, r->stdev);
+    printf("  Connections:     %ld connection established\n", (long)r->con_cnt);
+    printf("  Requests:        %llu requests\n", (unsigned long long)stagger_count());
+    printf("  Received:        %0.3f MB\n", (double)r->bytes / 1024.0 /1024.0);
+    printf("  Throughput:      %ld requests/second\n", (long)r->rate);
+    printf("  Average Latency: %0.3f +/-%0.3f msecs (and stdev)\n", stagger_average() / 1000000.0, stagger_stddev() / 1000000.0);
+    printf("  10%% Latency:     %0.3f msecs\n", stagger_at(0.1) / 1000000.0);
+    printf("  20%% Latency:     %0.3f msecs\n", stagger_at(0.2) / 1000000.0);
+    printf("  30%% Latency:     %0.3f msecs\n", stagger_at(0.3) / 1000000.0);
+    printf("  40%% Latency:     %0.3f msecs\n", stagger_at(0.4) / 1000000.0);
+    printf("  50%% Latency:     %0.3f msecs\n", stagger_at(0.5) / 1000000.0);
+    printf("  60%% Latency:     %0.3f msecs\n", stagger_at(0.6) / 1000000.0);
+    printf("  70%% Latency:     %0.3f msecs\n", stagger_at(0.7) / 1000000.0);
+    printf("  80%% Latency:     %0.3f msecs\n", stagger_at(0.8) / 1000000.0);
+    printf("  90%% Latency:     %0.3f msecs\n", stagger_at(0.9) / 1000000.0);
+    printf("  99%% Latency:     %0.3f msecs\n", stagger_at(0.99) / 1000000.0);
+
+    if (true) { // TBD command line option
+	lat_graph(160, 30);
+    }
 }
 
 static void
@@ -633,9 +703,20 @@ json_out(Perfer p, Results r) {
     printf("    \"connections\": %ld,\n", (long)r->con_cnt);
     printf("    \"requests\": %ld,\n", (long)r->ok_cnt);
     printf("    \"requestsPerSecond\": %ld,\n", (long)r->rate);
-    printf("    \"latencyMilliseconds\": %0.3f,\n", r->lat);
-    printf("    \"latencyStdev\": %0.3f\n", r->stdev);
-    printf("    \"TotalBytes\": %0.3f\n", (double)r->bytes / 1024.0 / 1024.0);
+    printf("    \"latencyAverageMilliseconds\": %0.3f,\n", stagger_average() / 1000000.0);
+    printf("    \"latencyMeanMilliseconds\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
+    printf("    \"latencyStdev\": %0.3f,\n", stagger_stddev() / 1000000.0);
+    printf("    \"latency10\": %0.3f,\n", stagger_at(0.1) / 1000000.0);
+    printf("    \"latency20\": %0.3f,\n", stagger_at(0.2) / 1000000.0);
+    printf("    \"latency30\": %0.3f,\n", stagger_at(0.3) / 1000000.0);
+    printf("    \"latency40\": %0.3f,\n", stagger_at(0.4) / 1000000.0);
+    printf("    \"latency50\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
+    printf("    \"latency60\": %0.3f,\n", stagger_at(0.6) / 1000000.0);
+    printf("    \"latency70\": %0.3f,\n", stagger_at(0.7) / 1000000.0);
+    printf("    \"latency80\": %0.3f,\n", stagger_at(0.8) / 1000000.0);
+    printf("    \"latency90\": %0.3f,\n", stagger_at(0.9) / 1000000.0);
+    printf("    \"latency99\": %0.3f,\n", stagger_at(0.99) / 1000000.0);
+    printf("    \"totalBytes\": %0.3f\n", (double)r->bytes / 1024.0 / 1024.0);
     printf("  }\n");
     printf("}\n");
 }
@@ -783,22 +864,15 @@ perfer_start(Perfer p) {
 	r.sent_cnt += d->sent_cnt;
 	r.ok_cnt += d->ok_cnt;
 	r.err_cnt += d->err_cnt;
-	r.lat_sum += d->lat_sum;
 	if (0.0 < d->start_time) {
 	    r.psum += (double)(d->end_time - d->start_time) / 1000000000.0;
 	    tcnt++;
 	}
-	r.stdev += d->lat_sq_sum;
 	r.bytes += d->data_amount;
     }
     if (0.0 < r.psum) {
 	r.psum /= tcnt;
 	r.rate = (double)r.ok_cnt / r.psum;
-    }
-    if (0 < r.ok_cnt) {
-	r.lat = r.lat_sum * 1000.0 / r.ok_cnt;
-	r.stdev /= (double)r.ok_cnt;
-	r.stdev = sqrt(r.stdev) * 1000.0;
     }
     if (p->json) {
 	json_out(p, &r);

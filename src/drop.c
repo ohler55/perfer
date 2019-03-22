@@ -11,10 +11,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "drop.h"
+#include "dtime.h"
 #include "perfer.h"
 #include "pool.h"
-#include "dtime.h"
-#include "drop.h"
+#include "stagger.h"
 
 static const char	content_length[] = "Content-Length:";
 static const char	transfer_encoding[] = "Transfer-Encoding:";
@@ -184,25 +185,13 @@ drop_recv(Drop d) {
 	    int64_t	recv_time = atomic_load(&d->recv_time);
 	    int		head = atomic_load(&d->phead);
 	    int64_t	current = atomic_load(&d->pipeline[head]);
+	    int64_t	dt = recv_time - current;
 
 	    d->ok_cnt++;
 	    d->data_amount += d->xsize;
-	    if (0 == current) {
-		if (0 < d->ok_cnt) {
-		    d->lat_sum = d->lat_sum * (double)(d->ok_cnt + 1) / (double)d->ok_cnt;
-		    d->lat_sq_sum = d->lat_sq_sum * (double)(d->ok_cnt + 1) / (double)d->ok_cnt;
-		}
-	    } else {
-		double	dt = (double)(recv_time - current) / 1000000000.0;
-		double	ave;
-		double	dif;
 
-		d->lat_sum += dt;
-		if (0 < d->ok_cnt) {
-		    ave = d->lat_sum / (double)d->ok_cnt;
-		    dif = dt - ave;
-		    d->lat_sq_sum += dif * dif;
-		}
+	    if (0 <= dt && 0 < current) {
+		stagger_add(recv_time - current);
 	    }
 	    d->end_time = recv_time;
 
