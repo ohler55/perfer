@@ -4,7 +4,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <math.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <poll.h>

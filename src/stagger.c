@@ -1,5 +1,6 @@
 // Copyright 2019 by Peter Ohler, All Rights Reserved
 
+#include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 
@@ -186,10 +187,29 @@ stagger_max() {
     return last;
 }
 
-
+// Standard Deviation in nanoseconds.
 double
 stagger_stddev() {
-    // TBD
+    uint64_t	cnt = 0;
+    double	sum = 0.0;
+    uint64_t	scnt;
+    int64_t	mean = (int64_t)stagger_at(0.5);
+    double	diff;
 
-    return 0.0;
+    for (Level level = bank.levels; 0 != level->top; level++) {
+	int	i = 0;
+
+	for (Slot *sp = level->slots; i < SLOT_CNT; i++, sp++) {
+	    scnt = atomic_load(sp);
+	    if (0 < scnt) {
+		cnt += scnt;
+		diff = (double)((int64_t)(level->inc * i) - mean);
+		sum += diff * diff * scnt;
+	    }
+	}
+    }
+    if (cnt <= 1) {
+	return 0.0;
+    }
+    return sqrt(sum / (double)(cnt - 1));
 }
