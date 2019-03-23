@@ -86,7 +86,7 @@ drop_connect_normal(Drop d) {
 
     return 0;
 FAIL:
-    d->err_cnt++;
+    atomic_fetch_add(&d->perfer->err_cnt, 1);
     d->finished = true;
     d->end_time = ntime();
     return errno;
@@ -111,9 +111,9 @@ drop_connect(Drop d) {
 	err = drop_connect_normal(d);
     }
     if (0 == err) {
-	d->con_cnt++;
+	atomic_fetch_add(&d->perfer->con_cnt, 1);
     } else {
-	d->err_cnt++;
+	atomic_fetch_add(&d->perfer->err_cnt, 1);
     }
     return err;
 }
@@ -133,7 +133,7 @@ drop_recv(Drop d) {
     if (0 > (rcnt = recv(d->sock, d->buf + d->rcnt, sizeof(d->buf) - d->rcnt - 1, 0))) {
 	if (EAGAIN != errno) {
 	    drop_cleanup(d);
-	    d->err_cnt++;
+	    atomic_fetch_add(&d->perfer->err_cnt, 1);
 	}
 	//printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
 	atomic_flag_clear(&d->queued);
@@ -170,7 +170,7 @@ drop_recv(Drop d) {
 		if ('\r' != *end) {
 		    printf("*-*-* error reading content length on %d.\n", d->sock);
 		    drop_cleanup(d);
-		    d->err_cnt++;
+		    atomic_fetch_add(&d->perfer->err_cnt, 1);
 		    atomic_flag_clear(&d->queued);
 		    return EIO;
 		}
@@ -187,9 +187,7 @@ drop_recv(Drop d) {
 	    int64_t	current = atomic_load(&d->pipeline[head]);
 	    int64_t	dt = recv_time - current;
 
-	    d->ok_cnt++;
-	    d->data_amount += d->xsize;
-
+	    atomic_fetch_add(&d->perfer->byte_cnt, d->xsize);
 	    if (0 <= dt && 0 < current) {
 		stagger_add(recv_time - current);
 	    }

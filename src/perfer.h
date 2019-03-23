@@ -51,7 +51,11 @@ typedef struct _perfer {
     atomic_int		seq;
     Header		headers;
 
-    pthread_mutex_t	print_mutex;
+    atomic_uint_fast64_t	con_cnt;
+    atomic_uint_fast64_t	err_cnt;
+    atomic_uint_fast64_t	byte_cnt;
+
+    pthread_mutex_t		print_mutex;
 } *Perfer;
 
 extern void	perfer_stop(Perfer h);

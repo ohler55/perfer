@@ -259,6 +259,10 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	printf("%s\n", strerror(errno));
 	return -1;
     }
+    atomic_init(&p->con_cnt, 0);
+    atomic_init(&p->err_cnt, 0);
+    atomic_init(&p->byte_cnt, 0);
+
     stagger_init();
 
     argv++;
@@ -663,20 +667,21 @@ print_out(Perfer p, Results r) {
 	printf("  Failures:        %ld\n", r->err_cnt);
     }
     printf("  Connections:     %ld connection established\n", (long)r->con_cnt);
-    printf("  Requests:        %llu requests\n", (unsigned long long)stagger_count());
+    printf("  Requests:        %ld requests\n", (long)r->ok_cnt);
     printf("  Received:        %0.3f MB\n", (double)r->bytes / 1024.0 /1024.0);
     printf("  Throughput:      %ld requests/second\n", (long)r->rate);
     printf("  Average Latency: %0.3f +/-%0.3f msecs (and stdev)\n", stagger_average() / 1000000.0, stagger_stddev() / 1000000.0);
-    printf("  10%% Latency:     %0.3f msecs\n", stagger_at(0.1) / 1000000.0);
-    printf("  20%% Latency:     %0.3f msecs\n", stagger_at(0.2) / 1000000.0);
-    printf("  30%% Latency:     %0.3f msecs\n", stagger_at(0.3) / 1000000.0);
-    printf("  40%% Latency:     %0.3f msecs\n", stagger_at(0.4) / 1000000.0);
-    printf("  50%% Latency:     %0.3f msecs\n", stagger_at(0.5) / 1000000.0);
-    printf("  60%% Latency:     %0.3f msecs\n", stagger_at(0.6) / 1000000.0);
-    printf("  70%% Latency:     %0.3f msecs\n", stagger_at(0.7) / 1000000.0);
-    printf("  80%% Latency:     %0.3f msecs\n", stagger_at(0.8) / 1000000.0);
-    printf("  90%% Latency:     %0.3f msecs\n", stagger_at(0.9) / 1000000.0);
-    printf("  99%% Latency:     %0.3f msecs\n", stagger_at(0.99) / 1000000.0);
+    printf("  Latency Spread:\n");
+    printf("      10%%:         %0.3f msecs\n", stagger_at(0.1) / 1000000.0);
+    printf("      20%%:         %0.3f msecs\n", stagger_at(0.2) / 1000000.0);
+    printf("      30%%:         %0.3f msecs\n", stagger_at(0.3) / 1000000.0);
+    printf("      40%%:         %0.3f msecs\n", stagger_at(0.4) / 1000000.0);
+    printf("      50%%:         %0.3f msecs\n", stagger_at(0.5) / 1000000.0);
+    printf("      60%%:         %0.3f msecs\n", stagger_at(0.6) / 1000000.0);
+    printf("      70%%:         %0.3f msecs\n", stagger_at(0.7) / 1000000.0);
+    printf("      80%%:         %0.3f msecs\n", stagger_at(0.8) / 1000000.0);
+    printf("      90%%:         %0.3f msecs\n", stagger_at(0.9) / 1000000.0);
+    printf("      99%%:         %0.3f msecs\n", stagger_at(0.99) / 1000000.0);
 
     if (0 < p->graph_width && 0 < p->graph_height) {
 	lat_graph(p->graph_width, p->graph_height);
@@ -710,20 +715,22 @@ json_out(Perfer p, Results r) {
     printf("    \"connections\": %ld,\n", (long)r->con_cnt);
     printf("    \"requests\": %ld,\n", (long)r->ok_cnt);
     printf("    \"requestsPerSecond\": %ld,\n", (long)r->rate);
+    printf("    \"totalBytes\": %0.3f,\n", (double)r->bytes / 1024.0 / 1024.0);
     printf("    \"latencyAverageMilliseconds\": %0.3f,\n", stagger_average() / 1000000.0);
     printf("    \"latencyMeanMilliseconds\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
     printf("    \"latencyStdev\": %0.3f,\n", stagger_stddev() / 1000000.0);
-    printf("    \"latency10\": %0.3f,\n", stagger_at(0.1) / 1000000.0);
-    printf("    \"latency20\": %0.3f,\n", stagger_at(0.2) / 1000000.0);
-    printf("    \"latency30\": %0.3f,\n", stagger_at(0.3) / 1000000.0);
-    printf("    \"latency40\": %0.3f,\n", stagger_at(0.4) / 1000000.0);
-    printf("    \"latency50\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
-    printf("    \"latency60\": %0.3f,\n", stagger_at(0.6) / 1000000.0);
-    printf("    \"latency70\": %0.3f,\n", stagger_at(0.7) / 1000000.0);
-    printf("    \"latency80\": %0.3f,\n", stagger_at(0.8) / 1000000.0);
-    printf("    \"latency90\": %0.3f,\n", stagger_at(0.9) / 1000000.0);
-    printf("    \"latency99\": %0.3f,\n", stagger_at(0.99) / 1000000.0);
-    printf("    \"totalBytes\": %0.3f\n", (double)r->bytes / 1024.0 / 1024.0);
+    printf("    \"latencySpread\": {,\n");
+    printf("      \"10\": %0.3f,\n", stagger_at(0.1) / 1000000.0);
+    printf("      \"20\": %0.3f,\n", stagger_at(0.2) / 1000000.0);
+    printf("      \"30\": %0.3f,\n", stagger_at(0.3) / 1000000.0);
+    printf("      \"40\": %0.3f,\n", stagger_at(0.4) / 1000000.0);
+    printf("      \"50\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
+    printf("      \"60\": %0.3f,\n", stagger_at(0.6) / 1000000.0);
+    printf("      \"70\": %0.3f,\n", stagger_at(0.7) / 1000000.0);
+    printf("      \"80\": %0.3f,\n", stagger_at(0.8) / 1000000.0);
+    printf("      \"90\": %0.3f,\n", stagger_at(0.9) / 1000000.0);
+    printf("      \"99\": %0.3f\n", stagger_at(0.99) / 1000000.0);
+    printf("    }\n");
     printf("  }\n");
     printf("}\n");
 }
@@ -780,9 +787,11 @@ poll_loop(void *x) {
 		    int	scnt = send(d->sock, p->req_body, p->req_len, 0);
 
 		    if (p->req_len != scnt) {
-			printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
-			d->err_cnt++;
-			drop_cleanup(d);
+			if (p->keep_alive) {
+			    printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
+			    atomic_fetch_add(&p->err_cnt, 1);
+			    drop_cleanup(d);
+			}
 			continue;
 		    }
 		    if (0 == d->start_time) {
@@ -823,7 +832,7 @@ poll_loop(void *x) {
 		continue;
 	    }
 	    if (0 != (d->pp->revents & POLLERR)) {
-		d->err_cnt++;
+		atomic_fetch_add(&p->err_cnt, 1);
 		drop_cleanup(d);
 	    }
 	    if (0 != (d->pp->revents & POLLIN)) {
@@ -867,16 +876,16 @@ perfer_start(Perfer p) {
 	pool_wait(pool);
     }
     for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
-	r.con_cnt += d->con_cnt;
 	r.sent_cnt += d->sent_cnt;
-	r.ok_cnt += d->ok_cnt;
-	r.err_cnt += d->err_cnt;
 	if (0.0 < d->start_time) {
 	    r.psum += (double)(d->end_time - d->start_time) / 1000000000.0;
 	    tcnt++;
 	}
-	r.bytes += d->data_amount;
     }
+    r.con_cnt = atomic_load(&p->con_cnt);
+    r.err_cnt = atomic_load(&p->err_cnt);
+    r.bytes = atomic_load(&p->byte_cnt);
+    r.ok_cnt = stagger_count();
     if (0.0 < r.psum) {
 	r.psum /= tcnt;
 	r.rate = (double)r.ok_cnt / r.psum;

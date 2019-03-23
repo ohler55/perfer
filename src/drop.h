@@ -33,10 +33,6 @@ typedef struct _drop {
     atomic_int_fast8_t	phead;
     atomic_int_fast8_t	ptail;
 
-    volatile long	con_cnt;
-    volatile int64_t	data_amount;
-    volatile long	err_cnt;
-    volatile long	ok_cnt;
     volatile int64_t	start_time;
     volatile int64_t	end_time;
     volatile long	sent_cnt;
