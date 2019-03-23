@@ -130,7 +130,8 @@ static const char	*help_lines[] = {
     "",
     "  <url>                   URL for requests.",
     "                          example: http://localhost:6464/index.html",
-    ""
+    "",
+    NULL
 };
 // hidden option is -z for poll_timeout
 
