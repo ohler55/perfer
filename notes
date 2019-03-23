@@ -3,15 +3,8 @@
 todo
 ----
 
-- redo latency
- - option graph (kind of fun)
-  - -g WxH
-
 - option for metered sends (example, use 1000 req/sec for latency normalization)
  - -m --meter <req/sec>
  - if metered, don't send from poll
  - loop in start then loops through drops and sends until time is done
   - for (t = start; true; t += rate) { dsleep for t - now }
-
-- stagger.[ch]
- - typedef struct _stag {

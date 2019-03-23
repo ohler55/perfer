@@ -62,7 +62,8 @@ static struct _perfer	perfer = {
     .addr_info = NULL,
     .tcnt = 1,
     .ccnt = 1,
-    .num = 0,
+    .graph_width = 0,
+    .graph_height = 0,
     .duration = 1.0,
     .ready_cnt = 0,
     .seq = 0,
@@ -95,9 +96,8 @@ static const char	*help_lines[] = {
     "  -d <duration>           Duration in seconds for the run. Positive decimal",
     "  --duration <duration>   values are accepted.",
     "",
-    "  -n <count>              Number of requests to send. The value will be",
-    "  --number <count>        rounded to the lowest multiple of the number of",
-    "                          threads.",
+    "  -g <wide>x<hight>       Print a latency graph with the dimensions specified.",
+    "  --graph <wide>x<hight>",
     "",
     "  -t <number>             Number of threads to use for sending requests and",
     "  --threads <number>      receiving responses. (default: 1)",
@@ -309,14 +309,20 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	switch (cnt = arg_match(argc, argv, &opt_val, "n", "-number")) {
+	switch (cnt = arg_match(argc, argv, &opt_val, "g", "-graph")) {
 	case 0: // no match
 	    break;
 	case 1:
 	case 2:
-	    p->num = strtol(opt_val, &end, 10);
-	    if ('\0' != *end || 0 >= p->num) {
-		printf("'%s' is not a valid number.\n", opt_val);
+	    p->graph_width = strtol(opt_val, &end, 10);
+	    if ('x' != *end || 0 >= p->graph_width || 1024 < p->graph_width) {
+		printf("'%s' is not a valid geometry specification.\n", opt_val);
+		help(app_name);
+		return -1;
+	    }
+	    p->graph_height = strtol(end + 1, &end, 10);
+	    if ('\0' != *end || 0 >= p->graph_height || 1024 < p->graph_height) {
+		printf("'%s' is not a valid geometry specification.\n", opt_val);
 		help(app_name);
 		return -1;
 	    }
@@ -612,7 +618,9 @@ lat_graph(int w, int h) {
 	    break;
 	}
     }
-    i--;
+    if ((1ULL << (i * 4)) - linc > linc - (1ULL << ((i - 1) * 4))) {
+	i--;
+    }
     linc = 1ULL << (i * 4);
     memset(vals, 0, sizeof(vals));
     for (i = 0, min = 0; i < w - 1; i++, min += linc) {
@@ -671,8 +679,8 @@ print_out(Perfer p, Results r) {
     printf("  90%% Latency:     %0.3f msecs\n", stagger_at(0.9) / 1000000.0);
     printf("  99%% Latency:     %0.3f msecs\n", stagger_at(0.99) / 1000000.0);
 
-    if (true) { // TBD command line option
-	lat_graph(160, 30);
+    if (0 < p->graph_width && 0 < p->graph_height) {
+	lat_graph(p->graph_width, p->graph_height);
     }
 }
 
