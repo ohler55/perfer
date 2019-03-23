@@ -3,11 +3,4 @@
 todo
 ----
 
-- latency points options
- - --latency 10,20,30,40
-
-- option for metered sends (example, use 1000 req/sec for latency normalization)
- - -m --meter <req/sec>
- - if metered, don't send from poll
- - loop in start then loops through drops and sends until time is done
-  - for (t = start; true; t += rate) { dsleep for t - now }
+- TLS

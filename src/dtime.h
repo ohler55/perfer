@@ -8,6 +8,7 @@
 extern double	dtime(void);
 extern double	dsleep(double t);
 extern double	dwait(double t);
+extern void	nwait(int64_t nsec);
 
 extern int64_t	ntime();
 

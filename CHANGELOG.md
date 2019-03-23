@@ -1,5 +1,19 @@
 # CHANGELOG
 
+### 1.5.0 - 2019-03-TBD
+
+Faster.
+
+- Internals reworked for better performance.
+
+- Latency spread and graph.
+
+- Total bytes received added to results.
+
+- JSON output option.
+
+- Meter option for better latency comparisons.
+
 ### 1.4.0 - 2019-03-07
 
 Command line options changed with a focus on using a URL.

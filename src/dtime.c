@@ -7,6 +7,7 @@
 #include "dtime.h"
 
 #define MIN_SLEEP	(1.0 / (double)CLOCKS_PER_SEC)
+#define MIN_NSLEEP	(1000000000ULL / CLOCKS_PER_SEC)
 
 #ifndef CLOCK_REALTIME_COURSE
 #define CLOCK_REALTIME_COURSE	CLOCK_REALTIME
@@ -43,6 +44,18 @@ dsleep(double t) {
 	return (double)rem.tv_sec + (double)rem.tv_nsec / 1000000000.0;
     }
     return 0.0;
+}
+
+void
+nwait(int64_t nsec) {
+    if (MIN_NSLEEP < nsec) {
+	struct timespec	req, rem;
+
+	nsec -= MIN_NSLEEP;
+	req.tv_sec = (time_t)(nsec / 1000000000LL);
+	req.tv_nsec = (long)(nsec - req.tv_sec * 1000000000LL);
+	nanosleep(&req, &rem);
+    }
 }
 
 double

@@ -34,7 +34,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.4.0"
+#define VERSION	"1.5.0"
 
 typedef struct _results {
     long	con_cnt;
@@ -61,11 +61,10 @@ static struct _perfer	perfer = {
     .addr_info = NULL,
     .tcnt = 1,
     .ccnt = 1,
+    .meter = 0,
     .graph_width = 0,
     .graph_height = 0,
     .duration = 1.0,
-    .ready_cnt = 0,
-    .seq = 0,
     .req_file = NULL,
     .req_body = NULL,
     .req_len = 0,
@@ -77,6 +76,7 @@ static struct _perfer	perfer = {
     .tls = false,
     .json = false,
     .headers = NULL,
+    .spread = NULL,
 };
 
 static const char	*help_lines[] = {
@@ -95,8 +95,8 @@ static const char	*help_lines[] = {
     "  -d <duration>           Duration in seconds for the run. Positive decimal",
     "  --duration <duration>   values are accepted.",
     "",
-    "  -g <wide>x<hight>       Print a latency graph with the dimensions specified.",
-    "  --graph <wide>x<hight>",
+    "  -m <rate>               Set a metering rate in request per second.",
+    "  --meter <rate>          (default: 0, indicating no metering)",
     "",
     "  -t <number>             Number of threads to use for sending requests and",
     "  --threads <number>      receiving responses. (default: 1)",
@@ -106,6 +106,12 @@ static const char	*help_lines[] = {
     "",
     "  -b <number>             Maximum backlog for pipeline on a connection.",
     "  --backlog <number>      (default: 1, range 1 - 15)",
+    "",
+    "  -l <percent,...>        Percentages of latency spread to report.",
+    "  --latency <percent,...> (example: 10,20,30,40,50,60,70,80,90,99)",
+    "",
+    "  -g <wide>x<high>        Print a latency graph with the dimensions specified.",
+    "  --graph <wide>x<high>",
     "",
     "  -r <file>               File with the full content of the HTTP request.",
     "  --request <file>        The -keep-alive option is ignored.",
@@ -259,6 +265,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	printf("%s\n", strerror(errno));
 	return -1;
     }
+    atomic_init(&p->sent_cnt, 0);
     atomic_init(&p->con_cnt, 0);
     atomic_init(&p->err_cnt, 0);
     atomic_init(&p->byte_cnt, 0);
@@ -386,6 +393,23 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
+	switch (cnt = arg_match(argc, argv, &opt_val, "m", "-meter")) {
+	case 0: // no match
+	    break;
+	case 1:
+	case 2:
+	    p->meter = strtol(opt_val, &end, 10);
+	    if ('\0' != *end || 0 > p->meter) {
+		printf("'%s' is not a valid meter rate.\n", opt_val);
+		help(app_name);
+		return -1;
+	    }
+	    continue;
+	    break;
+	default: // match but something went wrong
+	    help(app_name);
+	    return -1;
+	}
 	switch (cnt = arg_match(argc, argv, &p->req_file, "r", "-request")) {
 	case 0: // no match
 	    break;
@@ -433,6 +457,46 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    h->next = p->headers;
 	    p->headers = h;
 	    h->line = opt_val;
+	    continue;
+	    break;
+	}
+	default: // match but something went wrong
+	    help(app_name);
+	    return -1;
+	}
+	switch (cnt = arg_match(argc, argv, &opt_val, "l", "-latency")) {
+	case 0: // no match
+	    break;
+	case 1:
+	case 2: {
+	    Spread	tail = NULL;
+	    Spread	s;
+
+	    end = (char*)opt_val;
+	    do {
+		double	n = strtod(end, &end);
+
+		if (('\0' != *end && ',' != *end) || n <= 0.0 || 100.0 < n ) {
+		    printf("'%s' is not a valid percentage (0.0 to 100.0).\n", end);
+		    help(app_name);
+		    return -1;
+		}
+		if (',' == *end) {
+		    end++;
+		}
+		if (NULL == (s = (Spread)malloc(sizeof(struct _spread)))) {
+		    printf("*-*-* Out of memory.\n");
+		    exit(-1);
+		}
+		s->next = NULL;
+		s->percent = n;
+		if (NULL == tail) {
+		    p->spread = s;
+		} else {
+		    tail->next = s;
+		}
+		tail = s;
+	    } while ('\0' != *end);
 	    continue;
 	    break;
 	}
@@ -671,21 +735,16 @@ print_out(Perfer p, Results r) {
     printf("  Received:        %0.3f MB\n", (double)r->bytes / 1024.0 /1024.0);
     printf("  Throughput:      %ld requests/second\n", (long)r->rate);
     printf("  Average Latency: %0.3f +/-%0.3f msecs (and stdev)\n", stagger_average() / 1000000.0, stagger_stddev() / 1000000.0);
-    printf("  Latency Spread:\n");
-    printf("      10%%:         %0.3f msecs\n", stagger_at(0.1) / 1000000.0);
-    printf("      20%%:         %0.3f msecs\n", stagger_at(0.2) / 1000000.0);
-    printf("      30%%:         %0.3f msecs\n", stagger_at(0.3) / 1000000.0);
-    printf("      40%%:         %0.3f msecs\n", stagger_at(0.4) / 1000000.0);
-    printf("      50%%:         %0.3f msecs\n", stagger_at(0.5) / 1000000.0);
-    printf("      60%%:         %0.3f msecs\n", stagger_at(0.6) / 1000000.0);
-    printf("      70%%:         %0.3f msecs\n", stagger_at(0.7) / 1000000.0);
-    printf("      80%%:         %0.3f msecs\n", stagger_at(0.8) / 1000000.0);
-    printf("      90%%:         %0.3f msecs\n", stagger_at(0.9) / 1000000.0);
-    printf("      99%%:         %0.3f msecs\n", stagger_at(0.99) / 1000000.0);
-
+    if (NULL != p->spread) {
+	printf("  Latency Spread:\n");
+	for (Spread s = p->spread; NULL != s; s = s->next) {
+	    printf("     % 3.2f%%:      %0.3f msecs\n", s->percent, stagger_at(s->percent / 100.0) / 1000000.0);
+	}
+    }
     if (0 < p->graph_width && 0 < p->graph_height) {
 	lat_graph(p->graph_width, p->graph_height);
     }
+    printf("");
 }
 
 static void
@@ -718,21 +777,55 @@ json_out(Perfer p, Results r) {
     printf("    \"totalBytes\": %0.3f,\n", (double)r->bytes / 1024.0 / 1024.0);
     printf("    \"latencyAverageMilliseconds\": %0.3f,\n", stagger_average() / 1000000.0);
     printf("    \"latencyMeanMilliseconds\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
-    printf("    \"latencyStdev\": %0.3f,\n", stagger_stddev() / 1000000.0);
-    printf("    \"latencySpread\": {,\n");
-    printf("      \"10\": %0.3f,\n", stagger_at(0.1) / 1000000.0);
-    printf("      \"20\": %0.3f,\n", stagger_at(0.2) / 1000000.0);
-    printf("      \"30\": %0.3f,\n", stagger_at(0.3) / 1000000.0);
-    printf("      \"40\": %0.3f,\n", stagger_at(0.4) / 1000000.0);
-    printf("      \"50\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
-    printf("      \"60\": %0.3f,\n", stagger_at(0.6) / 1000000.0);
-    printf("      \"70\": %0.3f,\n", stagger_at(0.7) / 1000000.0);
-    printf("      \"80\": %0.3f,\n", stagger_at(0.8) / 1000000.0);
-    printf("      \"90\": %0.3f,\n", stagger_at(0.9) / 1000000.0);
-    printf("      \"99\": %0.3f\n", stagger_at(0.99) / 1000000.0);
-    printf("    }\n");
+    printf("    \"latencyStdev\": %0.3f%s\n", stagger_stddev() / 1000000.0, NULL != p->spread ? "," : "");
+    if (NULL != p->spread) {
+	printf("    \"latencySpread\": {\n");
+	for (Spread s = p->spread; NULL != s; s = s->next) {
+	    printf("      \"%3.2f\": %0.3f%s\n", s->percent, stagger_at(s->percent / 100.0) / 1000000.0, NULL == s->next ? "" : ",");
+	}
+	printf("    }\n");
+    }
     printf("  }\n");
     printf("}\n");
+}
+
+static int
+send_check(Perfer p, Drop d) {
+    int	err;
+
+    if (0 == d->sock) {
+	if (0 != (err = drop_connect(d))) {
+	    // Failed to connect. Abort the test.
+	    perfer_stop(p);
+	    return err;
+	}
+    }
+    if (drop_pending(d) < p->backlog) {
+	int	scnt = send(d->sock, p->req_body, p->req_len, 0);
+
+	if (p->req_len != scnt) {
+	    if (p->keep_alive) {
+		printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
+		atomic_fetch_add(&p->err_cnt, 1);
+		drop_cleanup(d);
+	    }
+	    return 0;
+	}
+	if (0 == d->start_time) {
+	    d->start_time = ntime();
+	}
+	atomic_fetch_add(&p->sent_cnt, 1);
+
+	int	tail = atomic_load(&d->ptail);
+
+	atomic_store(&d->pipeline[tail], ntime());
+	tail++;
+	if (PIPELINE_SIZE <= tail) {
+	    tail = 0;
+	}
+	atomic_store(&d->ptail, tail);
+    }
+    return 0;
 }
 
 static void*
@@ -775,38 +868,9 @@ poll_loop(void *x) {
 	    }
 	}
 	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
-	    if (!p->enough) {
-		if (0 == d->sock) {
-		    if (0 != (err = drop_connect(d))) {
-			// Failed to connect. Abort the test.
-			perfer_stop(p);
-			return NULL;
-		    }
-		}
-		if (drop_pending(d) < p->backlog) {
-		    int	scnt = send(d->sock, p->req_body, p->req_len, 0);
-
-		    if (p->req_len != scnt) {
-			if (p->keep_alive) {
-			    printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
-			    atomic_fetch_add(&p->err_cnt, 1);
-			    drop_cleanup(d);
-			}
-			continue;
-		    }
-		    if (0 == d->start_time) {
-			d->start_time = ntime();
-		    }
-		    d->sent_cnt++;
-
-		    int	tail = atomic_load(&d->ptail);
-
-		    atomic_store(&d->pipeline[tail], ntime());
-		    tail++;
-		    if (PIPELINE_SIZE <= tail) {
-			tail = 0;
-		    }
-		    atomic_store(&d->ptail, tail);
+	    if (!p->enough && 0 == p->meter) {
+		if (0 != send_check(p, d)) {
+		    return NULL;
 		}
 	    }
 	    if (0 < d->sock) {
@@ -848,7 +912,7 @@ poll_loop(void *x) {
 
 static int
 perfer_start(Perfer p) {
-    int			i;
+    uint64_t		i;
     int			err;
     struct _results	r;
     pthread_t		poll_thread;
@@ -870,18 +934,44 @@ perfer_start(Perfer p) {
 	    return err;
 	}
     }
-    dsleep(p->duration + 0.5); // A little extra to give the threads time to startup and connections to be made.
+    if (0 < p->meter) {
+	dsleep(0.5);
+
+	int64_t	dur = (int64_t)(p->duration * 1000000000.0);
+	int64_t	sep = 1000000000ULL / p->meter;
+	int64_t	done = ntime() + dur;
+	int64_t	next = ntime();
+	int64_t	now;
+
+	for (now = ntime(); now < done; now = ntime()) {
+	    if (next <= now) {
+		send_check(p, p->drops + (i % p->ccnt));
+		i++;
+		next += sep;
+	    } else {
+		nwait(next - now);
+	    }
+	}
+    } else {
+	dsleep(p->duration + 0.5); // A little extra to give the threads time to startup and connections to be made.
+    }
     p->enough = true;
     for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
 	pool_wait(pool);
     }
-    for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
-	r.sent_cnt += d->sent_cnt;
-	if (0.0 < d->start_time) {
-	    r.psum += (double)(d->end_time - d->start_time) / 1000000000.0;
-	    tcnt++;
+    if (0 < p->meter) {
+	r.psum = p->duration;
+	tcnt = 1;
+    } else {
+	for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
+	    if (0 < d->start_time && 0 < d->end_time) {
+		r.psum += (double)(d->end_time - d->start_time) / 1000000000.0;
+		tcnt++;
+
+	    }
 	}
     }
+    r.sent_cnt = atomic_load(&p->sent_cnt);
     r.con_cnt = atomic_load(&p->con_cnt);
     r.err_cnt = atomic_load(&p->err_cnt);
     r.bytes = atomic_load(&p->byte_cnt);

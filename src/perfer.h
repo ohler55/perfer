@@ -17,6 +17,11 @@ typedef struct _header {
     const char		*line;
 } *Header;
 
+typedef struct _spread {
+    struct _spread	*next;
+    double		percent;
+} *Spread;
+
 typedef struct _perfer {
     bool		inited;
     volatile bool	done;
@@ -27,6 +32,7 @@ typedef struct _perfer {
     struct _pool	*pools;
     long		tcnt;
     long		ccnt;
+    long		meter;
     const char		*url;
     const char		*addr;
     const char		*port;
@@ -47,11 +53,11 @@ typedef struct _perfer {
     bool		replace;
     bool		tls;
     bool		json;
-    atomic_int		ready_cnt;
-    atomic_int		seq;
     Header		headers;
+    Spread		spread;
 
     atomic_uint_fast64_t	con_cnt;
+    atomic_uint_fast64_t	sent_cnt;
     atomic_uint_fast64_t	err_cnt;
     atomic_uint_fast64_t	byte_cnt;
 
