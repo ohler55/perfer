@@ -3,6 +3,8 @@
 todo
 ----
 
+- stagger stddev
+
 - option for metered sends (example, use 1000 req/sec for latency normalization)
  - -m --meter <req/sec>
  - if metered, don't send from poll
