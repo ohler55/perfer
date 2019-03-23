@@ -130,7 +130,8 @@ static const char	*help_lines[] = {
     "",
     "  <url>                   URL for requests.",
     "                          example: http://localhost:6464/index.html",
-    ""
+    "",
+    NULL
 };
 // hidden option is -z for poll_timeout
 
@@ -744,7 +745,7 @@ print_out(Perfer p, Results r) {
     if (0 < p->graph_width && 0 < p->graph_height) {
 	lat_graph(p->graph_width, p->graph_height);
     }
-    printf("");
+    printf("\n");
 }
 
 static void
