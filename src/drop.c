@@ -24,7 +24,6 @@ void
 drop_init(Drop d, struct _perfer *perfer) {
     memset(d, 0, sizeof(struct _drop));
     d->perfer = perfer;
-    //atomic_init(&d->sent_time, 0);
     atomic_init(&d->recv_time, 0);
 
     atime	*end = d->pipeline + sizeof(d->pipeline) / sizeof(*d->pipeline);
@@ -34,7 +33,6 @@ drop_init(Drop d, struct _perfer *perfer) {
     }
     atomic_init(&d->phead, 0);
     atomic_init(&d->ptail, 0);
-    pthread_mutex_init(&d->moo, 0);
 }
 
 void

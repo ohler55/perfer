@@ -40,7 +40,6 @@ typedef struct _drop {
     volatile bool	finished;
     long		rcnt;    // recv count
     long		xsize;   // expected size of message
-    pthread_mutex_t	moo;
     char		buf[MAX_RESP_SIZE];
 } *Drop;
 
