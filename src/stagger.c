@@ -124,7 +124,7 @@ stagger_range(uint64_t min, uint64_t max) {
 	    if (max < v) {
 		return cnt;
 	    }
-	    if (min < v) {
+	    if (min <= v) {
 		cnt += atomic_load(sp);
 	    }
 	}

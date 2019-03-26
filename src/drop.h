@@ -12,6 +12,7 @@
 #include <openssl/err.h>
 #endif
 
+//#define MAX_RESP_SIZE	4096
 #define MAX_RESP_SIZE	16384
 //#define MAX_RESP_SIZE	64000
 #define PIPELINE_SIZE	16
@@ -39,6 +40,7 @@ typedef struct _drop {
     volatile bool	finished;
     long		rcnt;    // recv count
     long		xsize;   // expected size of message
+    pthread_mutex_t	moo;
     char		buf[MAX_RESP_SIZE];
 } *Drop;
 
@@ -48,5 +50,7 @@ extern int	drop_pending(Drop d);
 
 extern int	drop_connect(Drop d);
 extern int	drop_recv(Drop d);
+extern int	drop_warmup_send(Drop d);
+extern int	drop_warmup_recv(Drop d);
 
 #endif /* PERFER_DROP_H */

@@ -3,4 +3,9 @@
 todo
 ----
 
+- try epoll
+
+- try single thread that loops over drops and does a recv on those flagged by the poll loop
+ - separate branch
+
 - TLS

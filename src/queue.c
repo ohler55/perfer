@@ -9,7 +9,8 @@
 #include "drop.h"
 
 // lower gives faster response but burns more CPU. This is a reasonable compromise.
-#define RETRY_SECS	0.00001
+//#define RETRY_SECS	0.00001
+#define RETRY_SECS	0.0001
 
 // head and tail both increment and wrap.
 // tail points to next open space.

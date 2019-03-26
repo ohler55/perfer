@@ -61,6 +61,8 @@ static struct _perfer	perfer = {
     .addr_info = NULL,
     .tcnt = 1,
     .ccnt = 1,
+    .xsize = 0,
+    .xbuf = NULL,
     .meter = 0,
     .graph_width = 0,
     .graph_height = 0,
@@ -633,6 +635,7 @@ perfer_cleanup(Perfer p) {
     for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
 	drop_cleanup(d);
     }
+    free(p->xbuf);
     free(p->drops);
     free(p->addr_info);
     queue_cleanup(&p->q);
@@ -691,7 +694,7 @@ lat_graph(int w, int h) {
     }
     linc = 1ULL << (i * 4);
     memset(vals, 0, sizeof(vals));
-    for (i = 0, min = 0; i < w - 1; i++, min += linc) {
+    for (i = 0, min = linc; i < w - 1; i++, min += linc) {
 	v = stagger_range(min, min + linc);
 	vals[i] = v;
 	if (lh < v) {
@@ -733,10 +736,12 @@ print_out(Perfer p, Results r) {
     }
     printf("  Connections:     %ld connection established\n", (long)r->con_cnt);
     printf("  Requests:        %ld requests\n", (long)r->ok_cnt);
-    printf("  Received:        %0.3f MB\n", (double)r->bytes / 1024.0 /1024.0);
+    printf("  Received:        %0.3f MB (%0.3f MB/sec)\n", (double)r->bytes / 1024.0 /1024.0, (double)r->bytes / 1024.0 /1024.0 / r->psum);
     printf("  Throughput:      %ld requests/second\n", (long)r->rate);
     printf("  Average Latency: %0.3f +/-%0.3f msecs (and stdev)\n", stagger_average() / 1000000.0, stagger_stddev() / 1000000.0);
-    if (NULL != p->spread) {
+    if (NULL == p->spread) {
+	printf("  Mean Latency:    %0.3f\n", stagger_at(0.5) / 1000000.0);
+    } else {
 	printf("  Latency Spread:\n");
 	for (Spread s = p->spread; NULL != s; s = s->next) {
 	    printf("     % 3.2f%%:      %0.3f msecs\n", s->percent, stagger_at(s->percent / 100.0) / 1000000.0);
@@ -829,6 +834,41 @@ send_check(Perfer p, Drop d) {
     return 0;
 }
 
+static int
+warmup(Perfer p) {
+    Drop	d;
+    int		i;
+    int		err;
+
+    p->xsize = 0;
+    // Initialize connections before starting the benchmarks.
+    if (p->keep_alive) {
+	for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
+	    if (0 != (err = drop_connect(d)) ||
+		0 != (err = drop_warmup_send(d))) {
+		return err;
+	    }
+	}
+	for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
+	    if (0 != (err = drop_warmup_recv(d))) {
+		return err;
+	    }
+	    if (0 == p->xsize) {
+		p->xsize = d->xsize;
+		p->xbuf = (char*)malloc(p->xsize + 1);
+		memcpy(p->xbuf, d->buf, p->xsize);
+		p->xbuf[p->xsize] = '\0';
+	    } else if (p->xsize != d->xsize) {
+		p->xsize = -1;
+		free(p->xbuf);
+		p->xbuf = NULL;
+	    }
+	    d->xsize = 0;
+	}
+    }
+    return 0;
+}
+
 static void*
 poll_loop(void *x) {
     Perfer		p = (Perfer)x;
@@ -838,18 +878,7 @@ poll_loop(void *x) {
     int			i;
     int			dcnt = p->ccnt;
     int			pt = p->poll_timeout;
-    int			err;
 
-    // TBD only connect is keep-alive
-    // Initialize connections before starting the benchmarks.
-    for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
-	if (0 != (err = drop_connect(d))) {
-	    // Failed to connect. Abort the test.
-	    perfer_stop(p);
-	    return NULL;
-	}
-    }
-    dsleep(0.2);
     while (!p->done) {
 	if (p->enough) {
 	    bool	done = true;
@@ -924,6 +953,9 @@ perfer_start(Perfer p) {
 
     memset(&r, 0, sizeof(r));
 
+    if (0 != (err = warmup(p))) {
+	return err;
+    }
     if (0 != pthread_create(&poll_thread, NULL, poll_loop, p)) {
 	printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
 	return errno;

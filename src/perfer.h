@@ -48,6 +48,8 @@ typedef struct _perfer {
     int			graph_width;
     int			graph_height;
     int			poll_timeout;
+    int			xsize;
+    char		*xbuf;
     bool		keep_alive;
     bool		verbose;
     bool		replace;

@@ -34,6 +34,7 @@ drop_init(Drop d, struct _perfer *perfer) {
     }
     atomic_init(&d->phead, 0);
     atomic_init(&d->ptail, 0);
+    pthread_mutex_init(&d->moo, 0);
 }
 
 void
@@ -124,8 +125,8 @@ drop_recv(Drop d) {
 	atomic_flag_clear(&d->queued);
 	return 0;
     }
+    Perfer	p = d->perfer;
     ssize_t	rcnt;
-    long	hsize = 0;
 
     if (0 == d->sock) {
 	return 0;
@@ -140,56 +141,70 @@ drop_recv(Drop d) {
 	return errno;
     }
     d->rcnt += rcnt;
-    //d->buf[d->rcnt] = '\0';
+
+    int64_t	recv_time = atomic_load(&d->recv_time);
+
     while (0 < d->rcnt) {
 	if (0 >= d->xsize) {
-	    char	*hend = strstr(d->buf, "\r\n\r\n");
-	    char	*cl = strstr(d->buf, content_length);
-
-	    if (NULL == hend) {
-		atomic_flag_clear(&d->queued);
-		return 0;
-	    }
-	    if (NULL == cl) {
-		char	*te = strstr(d->buf, transfer_encoding);
-
-		// TBD Handle chunking correctly. This approach only works
-		// when all the chunks come in one read and no more than that.
-		if (NULL != te && 0 == strncasecmp("chunked\r", te + sizeof(transfer_encoding), 8)) {
-		    d->xsize = d->rcnt;
-		} else {
-		    d->xsize = hend - d->buf + 4;
-		}
+	    if (0 < p->xsize && 0 == memcmp(p->xbuf, d->buf, p->xsize)) {
+		d->xsize = p->xsize;
 	    } else {
-		cl += sizeof(content_length);
-		for (; ' ' == *cl; cl++) {
-		}
-		char	*end;
-		long	len = strtol(cl, &end, 10);
+		char	*cl = strstr(d->buf, content_length);
+		char	*hend;
 
-		if ('\r' != *end) {
-		    printf("*-*-* error reading content length on %d.\n", d->sock);
-		    drop_cleanup(d);
-		    atomic_fetch_add(&d->perfer->err_cnt, 1);
-		    atomic_flag_clear(&d->queued);
-		    return EIO;
+		if (NULL == cl) {
+		    hend = strstr(d->buf, "\r\n\r\n");
+		} else {
+		    hend = strstr(cl, "\r\n\r\n");
 		}
-		d->xsize = hend - d->buf + 4 + len;
+		if (NULL == hend) {
+		    atomic_flag_clear(&d->queued);
+		    return 0;
+		}
+		if (NULL == cl) {
+		    char	*te = strstr(d->buf, transfer_encoding);
+
+		    // TBD Handle chunking correctly. This approach only works
+		    // when all the chunks come in one read and no more than that.
+		    if (NULL != te && 0 == strncasecmp("chunked\r", te + sizeof(transfer_encoding), 8)) {
+			d->xsize = d->rcnt;
+		    } else {
+			d->xsize = hend - d->buf + 4;
+		    }
+		} else {
+		    cl += sizeof(content_length);
+		    for (; ' ' == *cl; cl++) {
+		    }
+		    char	*end;
+		    long	len = strtol(cl, &end, 10);
+
+		    if ('\r' != *end) {
+			printf("*-*-* error reading content length on %d.\n", d->sock);
+			drop_cleanup(d);
+			atomic_fetch_add(&p->err_cnt, 1);
+			atomic_flag_clear(&d->queued);
+			return EIO;
+		    }
+		    d->xsize = hend - d->buf + 4 + len;
+		}
+		if (0 >= d->xsize) {
+		    break;
+		}
 	    }
-	    if (0 >= d->xsize) {
-		break;
-	    }
-	    hsize = hend - d->buf;
 	}
 	if (d->xsize <= d->rcnt) {
-	    int64_t	recv_time = atomic_load(&d->recv_time);
 	    int		head = atomic_load(&d->phead);
 	    int64_t	current = atomic_load(&d->pipeline[head]);
 	    int64_t	dt = recv_time - current;
 
-	    atomic_fetch_add(&d->perfer->byte_cnt, d->xsize);
-	    if (0 <= dt && 0 < current) {
-		stagger_add(recv_time - current);
+	    atomic_fetch_add(&p->byte_cnt, d->xsize);
+	    if (0 < current) {
+		if (dt < 0) {
+		    dt = 0;
+		}
+		stagger_add(dt);
+	    } else {
+		atomic_fetch_add(&p->err_cnt, 1);
 	    }
 	    d->end_time = recv_time;
 
@@ -198,18 +213,7 @@ drop_recv(Drop d) {
 		head = 0;
 	    }
 	    atomic_store(&d->phead, head);
-
-	    if (d->perfer->verbose) {
-		char	save = d->buf[d->xsize];
-
-		d->buf[d->xsize] = '\0';
-		pthread_mutex_lock(&d->perfer->print_mutex);
-		printf("\n%ld %ld %ld --------------------------------------------------------------------------------\n%s\n",
-		       d->xsize, d->rcnt, hsize, d->buf);
-		pthread_mutex_unlock(&d->perfer->print_mutex);
-		d->buf[d->xsize] = save;
-	    }
-	    if ((d->perfer->enough || !d->perfer->keep_alive) && 0 >= drop_pending(d) ) {
+	    if ((p->enough || !p->keep_alive) && 0 >= drop_pending(d) ) {
 		drop_cleanup(d);
 		atomic_flag_clear(&d->queued);
 		return 0;
@@ -229,6 +233,105 @@ drop_recv(Drop d) {
 	}
     }
     atomic_flag_clear(&d->queued);
+
+    return 0;
+}
+
+int
+drop_warmup_send(Drop d) {
+    if (d->perfer->req_len != send(d->sock, d->perfer->req_body, d->perfer->req_len, 0)) {
+	printf("*-*-* error sending request: %s\n", strerror(errno));
+	drop_cleanup(d);
+	return errno;
+    }
+    return 0;
+}
+
+int
+drop_warmup_recv(Drop d) {
+    ssize_t	rcnt;
+    long	hsize = 0;
+    double	giveup = dtime() + 2.0;
+    Perfer	p = d->perfer;
+
+    while (true) {
+	if (giveup < dtime()) {
+	    printf("*-*-* timed out waiting for a response\n");
+	    return -1;
+	}
+	if (0 > (rcnt = recv(d->sock, d->buf + d->rcnt, sizeof(d->buf) - d->rcnt - 1, 0))) {
+	    if (EAGAIN != errno) {
+		printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
+		drop_cleanup(d);
+		return errno;
+	    }
+	    dsleep(0.001);
+	    continue;
+	}
+	d->rcnt += rcnt;
+	if (0 < d->rcnt) {
+	    if (0 >= d->xsize) {
+		char	*cl = strstr(d->buf, content_length);
+		char	*hend;
+
+		if (NULL == cl) {
+		    hend = strstr(d->buf, "\r\n\r\n");
+		} else {
+		    hend = strstr(cl, "\r\n\r\n");
+		}
+		if (NULL == hend) {
+		    atomic_flag_clear(&d->queued);
+		    return 0;
+		}
+		if (NULL == cl) {
+		    char	*te = strstr(d->buf, transfer_encoding);
+
+		    // TBD Handle chunking correctly. This approach only works
+		    // when all the chunks come in one read and no more than that.
+		    if (NULL != te && 0 == strncasecmp("chunked\r", te + sizeof(transfer_encoding), 8)) {
+			d->xsize = d->rcnt;
+		    } else {
+			d->xsize = hend - d->buf + 4;
+		    }
+		} else {
+		    cl += sizeof(content_length);
+		    for (; ' ' == *cl; cl++) {
+		    }
+		    char	*end;
+		    long	len = strtol(cl, &end, 10);
+
+		    if ('\r' != *end) {
+			printf("*-*-* error reading content length on %d.\n", d->sock);
+			drop_cleanup(d);
+			atomic_fetch_add(&p->err_cnt, 1);
+			atomic_flag_clear(&d->queued);
+			return EIO;
+		    }
+		    d->xsize = hend - d->buf + 4 + len;
+		}
+		if (0 >= d->xsize) {
+		    break;
+		}
+		hsize = hend - d->buf;
+	    }
+	    if (d->xsize <= d->rcnt) {
+		if (p->verbose) {
+		    char	save = d->buf[d->xsize];
+
+		    d->buf[d->xsize] = '\0';
+		    pthread_mutex_lock(&p->print_mutex);
+		    printf("\nsize: %ld body: %ld --------------------------------------------------------------------------------\n%s\n",
+			   d->xsize, d->xsize - hsize, d->buf);
+		    pthread_mutex_unlock(&p->print_mutex);
+		    d->buf[d->xsize] = save;
+		}
+		d->rcnt = 0;
+		break;
+	    }
+	}
+    }
+    d->rcnt = 0;
+    // d->xsize = 0; set outside so the xsize can be grabbed and compared
 
     return 0;
 }
