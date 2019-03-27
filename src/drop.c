@@ -120,7 +120,6 @@ drop_connect(Drop d) {
 int
 drop_recv(Drop d) {
     if (0 >= drop_pending(d)) {
-	atomic_flag_clear(&d->queued);
 	return 0;
     }
     Perfer	p = d->perfer;
@@ -135,7 +134,6 @@ drop_recv(Drop d) {
 	    atomic_fetch_add(&d->perfer->err_cnt, 1);
 	}
 	//printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
-	atomic_flag_clear(&d->queued);
 	return errno;
     }
     d->rcnt += rcnt;
@@ -156,7 +154,6 @@ drop_recv(Drop d) {
 		    hend = strstr(cl, "\r\n\r\n");
 		}
 		if (NULL == hend) {
-		    atomic_flag_clear(&d->queued);
 		    return 0;
 		}
 		if (NULL == cl) {
@@ -180,7 +177,6 @@ drop_recv(Drop d) {
 			printf("*-*-* error reading content length on %d.\n", d->sock);
 			drop_cleanup(d);
 			atomic_fetch_add(&p->err_cnt, 1);
-			atomic_flag_clear(&d->queued);
 			return EIO;
 		    }
 		    d->xsize = hend - d->buf + 4 + len;
@@ -213,7 +209,6 @@ drop_recv(Drop d) {
 	    atomic_store(&d->phead, head);
 	    if ((p->enough || !p->keep_alive) && 0 >= drop_pending(d) ) {
 		drop_cleanup(d);
-		atomic_flag_clear(&d->queued);
 		return 0;
 	    } else {
 		if (d->xsize < d->rcnt) {
@@ -230,8 +225,6 @@ drop_recv(Drop d) {
 	    break;
 	}
     }
-    atomic_flag_clear(&d->queued);
-
     return 0;
 }
 
@@ -278,7 +271,6 @@ drop_warmup_recv(Drop d) {
 		    hend = strstr(cl, "\r\n\r\n");
 		}
 		if (NULL == hend) {
-		    atomic_flag_clear(&d->queued);
 		    return 0;
 		}
 		if (NULL == cl) {
@@ -302,7 +294,6 @@ drop_warmup_recv(Drop d) {
 			printf("*-*-* error reading content length on %d.\n", d->sock);
 			drop_cleanup(d);
 			atomic_fetch_add(&p->err_cnt, 1);
-			atomic_flag_clear(&d->queued);
 			return EIO;
 		    }
 		    d->xsize = hend - d->buf + 4 + len;

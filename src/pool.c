@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-//#include <unistd.h>
 
 #include "dtime.h"
 #include "drop.h"
@@ -22,6 +21,7 @@ loop(void *x) {
 	    continue;
 	}
 	drop_recv(d);
+	atomic_flag_clear(&d->queued);
     }
     p->finished = true;
 

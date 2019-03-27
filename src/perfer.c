@@ -602,7 +602,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
     int		i;
 
     p->addr_info = get_addr_info(p->addr, p->port);
-    if (!p->keep_alive) {
+    if (!p->keep_alive || 0 < p->meter) {
 	p->backlog = 1;
     }
 #ifdef WITH_OPENSSL
@@ -921,7 +921,7 @@ poll_loop(void *x) {
 	if (0 == i) {
 	    continue;
 	}
-	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
+	for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
 	    if (NULL == d->pp || 0 == d->pp->revents || 0 == d->sock) {
 		continue;
 	    }
