@@ -16,6 +16,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <sys/epoll.h>
+
 #ifdef WITH_OPENSSL
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
@@ -940,6 +942,75 @@ poll_loop(void *x) {
     return NULL;
 }
 
+static void*
+epoll_loop(void *x) {
+    Perfer		p = (Perfer)x;
+    struct epoll_event	events[p->ccnt];
+    struct epoll_event	*ep;
+    Drop		d;
+    int			i;
+    int			cnt;
+    int			dcnt = p->ccnt;
+    int			pt = p->poll_timeout;
+    int			efd;
+
+    if (0 > (efd = epoll_create(1))) {
+	printf("*-*-* failed to create epoll: %s\n", strerror(errno));
+	return NULL;
+    }
+    for (d = p->drops, i = dcnt, ep = events; 0 < i; i--, d++) {
+	struct epoll_event	event = {
+	    .events = EPOLLIN,
+	    .data = {
+		.ptr = d,
+	    },
+	};
+	if (0 > epoll_ctl(efd, EPOLL_CTL_ADD, d->sock, &event)) {
+	    printf("*-*-* failed to add epoll: %s\n", strerror(errno));
+	}
+    }
+    while (!p->done) {
+	if (p->enough) {
+	    bool	done = true;
+
+	    for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
+		if (0 < drop_pending(d)) {
+		    done = false;
+		    break;
+		}
+	    }
+	    if (done) {
+		p->done = true;
+		for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
+		    drop_cleanup(d);
+		}
+		break;
+	    }
+	}
+	for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
+	    if (!p->enough && 0 == p->meter) {
+		if (0 != send_check(p, d)) {
+		    return NULL;
+		}
+	    }
+	}
+	if (0 > (cnt = epoll_wait(efd, events, sizeof(events) / sizeof(*events), pt))) {
+	    printf("*-*-* epool wait fails: %s\n", strerror(errno));
+	    return NULL;
+	}
+	for (ep = events; 0 < cnt; ep++, cnt--) {
+	    d = (Drop)ep->data.ptr;
+	    if (0 != (ep->events & EPOLLIN)) {
+		if (!atomic_flag_test_and_set(&d->queued)) {
+		    atomic_store(&d->recv_time, ntime());
+		    queue_push(&p->q, d);
+		}
+	    }
+	}
+    }
+    return NULL;
+}
+
 static int
 perfer_start(Perfer p) {
     uint64_t		i;
@@ -956,9 +1027,16 @@ perfer_start(Perfer p) {
     if (0 != (err = warmup(p))) {
 	return err;
     }
+    if (true) {
+    if (0 != pthread_create(&poll_thread, NULL, epoll_loop, p)) {
+	printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
+	return errno;
+    }
+    } else {
     if (0 != pthread_create(&poll_thread, NULL, poll_loop, p)) {
 	printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
 	return errno;
+    }
     }
     for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
 	if (0 != (err = pool_start(pool, p))) {
