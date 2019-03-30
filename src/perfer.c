@@ -15,9 +15,9 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-
+#ifdef HAVE_EPOLL
 #include <sys/epoll.h>
-
+#endif
 #ifdef WITH_OPENSSL
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
@@ -79,6 +79,7 @@ static struct _perfer	perfer = {
     .replace = false,
     .tls = false,
     .json = false,
+    .no_epoll = false,
     .headers = NULL,
     .spread = NULL,
 };
@@ -138,6 +139,7 @@ static const char	*help_lines[] = {
     NULL
 };
 // hidden option is -z for poll_timeout
+// hidden option is -e for no_epoll
 
 static void
 help(const char *app_name) {
@@ -520,6 +522,18 @@ perfer_init(Perfer p, int argc, const char **argv) {
 		help(app_name);
 		return -1;
 	    }
+	    continue;
+	    break;
+	default: // match but something went wrong
+	    help(app_name);
+	    return -1;
+	}
+	switch (cnt = arg_match(argc, argv, &opt_val, "e", "-no_epoll")) {
+	case 0: // no match
+	    break;
+	case 1:
+	case 2:
+	    p->no_epoll = true;
 	    continue;
 	    break;
 	default: // match but something went wrong
@@ -942,6 +956,7 @@ poll_loop(void *x) {
     return NULL;
 }
 
+#ifdef HAVE_EPOLL
 static void*
 epoll_loop(void *x) {
     Perfer		p = (Perfer)x;
@@ -996,6 +1011,7 @@ epoll_loop(void *x) {
 	}
 	if (0 > (cnt = epoll_wait(efd, events, sizeof(events) / sizeof(*events), pt))) {
 	    printf("*-*-* epool wait fails: %s\n", strerror(errno));
+	    perfer_stop(p);
 	    return NULL;
 	}
 	for (ep = events; 0 < cnt; ep++, cnt--) {
@@ -1010,6 +1026,7 @@ epoll_loop(void *x) {
     }
     return NULL;
 }
+#endif
 
 static int
 perfer_start(Perfer p) {
@@ -1021,22 +1038,28 @@ perfer_start(Perfer p) {
     Pool		pool;
     Drop		d;
     int			tcnt = 0;
+    bool		use_epoll = p->keep_alive && !p->no_epoll;
 
+#ifndef HAVE_EPOLL
+    use_epoll = false;
+#endif
     memset(&r, 0, sizeof(r));
 
     if (0 != (err = warmup(p))) {
 	return err;
     }
-    if (true) {
-    if (0 != pthread_create(&poll_thread, NULL, epoll_loop, p)) {
-	printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
-	return errno;
-    }
+    if (use_epoll) {
+#ifdef HAVE_EPOLL
+	if (0 != pthread_create(&poll_thread, NULL, epoll_loop, p)) {
+	    printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
+	    return errno;
+	}
+#endif
     } else {
-    if (0 != pthread_create(&poll_thread, NULL, poll_loop, p)) {
-	printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
-	return errno;
-    }
+	if (0 != pthread_create(&poll_thread, NULL, poll_loop, p)) {
+	    printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
+	    return errno;
+	}
     }
     for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
 	if (0 != (err = pool_start(pool, p))) {

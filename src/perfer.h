@@ -55,6 +55,7 @@ typedef struct _perfer {
     bool		replace;
     bool		tls;
     bool		json;
+    bool		no_epoll;
     Header		headers;
     Spread		spread;
 

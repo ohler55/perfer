@@ -3,6 +3,10 @@
 todo
 ----
 
-- try epoll
+- epoll
+ - only use when keep-alive since add and del are slower than just using poll
+ - makefile for epoll
+ - add option to not use epoll otherwise default if available
+
 
 - TLS

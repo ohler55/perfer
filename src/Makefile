@@ -1,9 +1,12 @@
+EPOLL_DEF :=
+
 ifeq ($(shell uname -s), Darwin)
 	CV := c11
 	CC := cc
 else
 	CV := gnu11
 	CC := gcc
+	EPOLL_DEF := -DHAVE_EPOLL
 endif
 
 CFLAGS := -c -Wall -O3 -std=$(CV) -pedantic
@@ -45,4 +48,4 @@ $(TARGET): $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LIBS)
 
 %.o : %.c  $(HEADERS)
-	$(CC) -I. $(CFLAGS) $(SSL_DEF) -o $@ $<
+	$(CC) -I. $(CFLAGS) $(SSL_DEF) $(EPOLL_DEF) -o $@ $<

@@ -136,6 +136,9 @@ drop_recv(Drop d) {
 	//printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
 	return errno;
     }
+    if (0 == rcnt) {
+	return 0;
+    }
     d->rcnt += rcnt;
 
     int64_t	recv_time = atomic_load(&d->recv_time);
