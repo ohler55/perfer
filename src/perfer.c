@@ -36,7 +36,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.5.0"
+#define VERSION	"1.5.1"
 
 typedef struct _results {
     long	con_cnt;
@@ -779,7 +779,7 @@ json_out(Perfer p, Results r) {
 	   (NULL == p->port) ? "80" : p->port,
 	   NULL == p->path ? "" : p->path);
     printf("    \"threads\": %ld,\n", p->tcnt);
-    printf("    \"connectionsPerThread\": %ld,\n", p->ccnt);
+    printf("    \"connections\": %ld,\n", p->ccnt);
     printf("    \"duration\": %0.1f,\n", r->psum / p->tcnt);
     printf("    \"keepAlive\": %s\n", p->keep_alive ? "true" : "false");
     printf("  },\n");
@@ -796,7 +796,7 @@ json_out(Perfer p, Results r) {
     printf("    \"connections\": %ld,\n", (long)r->con_cnt);
     printf("    \"requests\": %ld,\n", (long)r->ok_cnt);
     printf("    \"requestsPerSecond\": %ld,\n", (long)r->rate);
-    printf("    \"totalBytes\": %0.3f,\n", (double)r->bytes / 1024.0 / 1024.0);
+    printf("    \"totalBytes\": %ld,\n", r->bytes);
     printf("    \"latencyAverageMilliseconds\": %0.3f,\n", stagger_average() / 1000000.0);
     printf("    \"latencyMeanMilliseconds\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
     printf("    \"latencyStdev\": %0.3f%s\n", stagger_stddev() / 1000000.0, NULL != p->spread ? "," : "");
@@ -827,7 +827,9 @@ send_check(Perfer p, Drop d) {
 
 	if (p->req_len != scnt) {
 	    if (p->keep_alive) {
-		printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
+		if (!p->json) {
+		    printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
+		}
 		atomic_fetch_add(&p->err_cnt, 1);
 		drop_cleanup(d);
 	    }

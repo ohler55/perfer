@@ -177,7 +177,9 @@ drop_recv(Drop d) {
 		    long	len = strtol(cl, &end, 10);
 
 		    if ('\r' != *end) {
-			printf("*-*-* error reading content length on %d.\n", d->sock);
+			if (!p->json) {
+			    printf("*-*-* error reading content length on %d.\n", d->sock);
+			}
 			drop_cleanup(d);
 			atomic_fetch_add(&p->err_cnt, 1);
 			return EIO;
@@ -250,12 +252,16 @@ drop_warmup_recv(Drop d) {
 
     while (true) {
 	if (giveup < dtime()) {
-	    printf("*-*-* timed out waiting for a response\n");
+	    if (!p->json) {
+		printf("*-*-* timed out waiting for a response\n");
+	    }
 	    return -1;
 	}
 	if (0 > (rcnt = recv(d->sock, d->buf + d->rcnt, sizeof(d->buf) - d->rcnt - 1, 0))) {
 	    if (EAGAIN != errno) {
-		printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
+		if (!p->json) {
+		    printf("*-*-* error reading response on %d: %s\n", d->sock, strerror(errno));
+		}
 		drop_cleanup(d);
 		return errno;
 	    }
@@ -294,7 +300,9 @@ drop_warmup_recv(Drop d) {
 		    long	len = strtol(cl, &end, 10);
 
 		    if ('\r' != *end) {
-			printf("*-*-* error reading content length on %d.\n", d->sock);
+			if (!p->json) {
+			    printf("*-*-* error reading content length on %d.\n", d->sock);
+			}
 			drop_cleanup(d);
 			atomic_fetch_add(&p->err_cnt, 1);
 			return EIO;

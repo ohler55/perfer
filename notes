@@ -3,9 +3,4 @@
 todo
 ----
 
-- epoll
- - only use when keep-alive since add and del are slower than just using poll
-
-- test post
-
 - TLS

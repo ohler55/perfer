@@ -1,5 +1,11 @@
 # CHANGELOG
 
+### 1.5.1 - 2019-04-02
+
+Even faster!
+
+- Changes in the code for better performance and cleanup of JSON output.
+
 ### 1.5.0 - 2019-03-23
 
 Faster.
