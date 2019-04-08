@@ -1,5 +1,11 @@
 # CHANGELOG
 
+### 1.5.2 - 2019-04-08
+
+Duration bug fix
+
+- Fixed the duration calculation for multiple threads in JSON output.
+
 ### 1.5.1 - 2019-04-02
 
 Even faster!

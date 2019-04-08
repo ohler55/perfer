@@ -36,7 +36,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.5.1"
+#define VERSION	"1.5.2"
 
 typedef struct _results {
     long	con_cnt;
@@ -780,7 +780,7 @@ json_out(Perfer p, Results r) {
 	   NULL == p->path ? "" : p->path);
     printf("    \"threads\": %ld,\n", p->tcnt);
     printf("    \"connections\": %ld,\n", p->ccnt);
-    printf("    \"duration\": %0.1f,\n", r->psum / p->tcnt);
+    printf("    \"duration\": %0.1f,\n", r->psum);
     printf("    \"keepAlive\": %s\n", p->keep_alive ? "true" : "false");
     printf("  },\n");
     printf("  \"results\": {\n");
