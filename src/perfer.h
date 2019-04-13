@@ -26,8 +26,8 @@ typedef struct _perfer {
     bool		inited;
     volatile bool	done;
     volatile bool	enough;
-    struct _queue	q;
-    struct _drop	*drops;
+    //struct _queue	q;
+    //struct _drop	*drops;
 
     struct _pool	*pools;
     long		tcnt;
@@ -48,8 +48,6 @@ typedef struct _perfer {
     int			graph_width;
     int			graph_height;
     int			poll_timeout;
-    int			xsize;
-    char		*xbuf;
     bool		keep_alive;
     bool		verbose;
     bool		replace;

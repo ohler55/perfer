@@ -20,11 +20,13 @@
 typedef atomic_int_fast64_t	atime;
 
 struct _perfer;
+struct _pool;
 
 typedef struct _drop {
     volatile int	sock;
     struct pollfd	*pp;
     struct _perfer	*perfer; // for addr and request body
+    struct _pool	*pool;
 #ifdef WITH_OPENSSL
     BIO			*bio;
 #endif
@@ -43,7 +45,7 @@ typedef struct _drop {
     char		buf[MAX_RESP_SIZE];
 } *Drop;
 
-extern void	drop_init(Drop d, struct _perfer *perfer);
+extern void	drop_init(Drop d, struct _pool *pool);
 extern void	drop_cleanup(Drop d);
 extern int	drop_pending(Drop d);
 

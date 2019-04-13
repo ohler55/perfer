@@ -53,7 +53,6 @@ typedef struct _results {
 static struct _perfer	perfer = {
     .inited = false,
     .done = false,
-    .drops = NULL,
     .pools = NULL,
     .url = NULL,
     .addr = NULL,
@@ -63,8 +62,6 @@ static struct _perfer	perfer = {
     .addr_info = NULL,
     .tcnt = 1,
     .ccnt = 1,
-    .xsize = 0,
-    .xbuf = NULL,
     .meter = 0,
     .graph_width = 0,
     .graph_height = 0,
@@ -259,6 +256,33 @@ get_addr_info(const char *host, const char *port) {
 	return NULL;
     }
     return res;
+}
+
+static int
+init_pools(Perfer p) {
+    int		err;
+    int		i;
+    long	dcnt = p->ccnt / p->tcnt;
+    long	rem = p->ccnt - (dcnt * p->tcnt);
+    Pool	pool;
+
+    if (NULL == (p->pools = (Pool)calloc(p->tcnt, sizeof(struct _pool)))) {
+	printf("*-*-* Failed to allocate memory for thread pool. %s\n", strerror(errno));
+	return ENOMEM;
+    }
+    for (i = p->tcnt, pool = p->pools; 0 < i; i--, pool++) {
+	if (0 < rem) {
+	    if (0 != (err = pool_init(pool, p, dcnt + 1))) {
+		return err;
+	    }
+	    rem--;
+	} else {
+	    if (0 != (err = pool_init(pool, p, dcnt))) {
+		return err;
+	    }
+	}
+    }
+    return 0;
 }
 
 static int
@@ -571,8 +595,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
     if (0 != parse_url(p)) {
 	return -1;
     }
-    if (0 != queue_init(&p->q, p->ccnt + 4)) {
-	printf("*-*-* Not enough memory for connection queue.\n");
+    if (0 != init_pools(p)) {
 	return -1;
     }
     if (NULL == p->req_file) {
@@ -610,13 +633,6 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	p->replace = (NULL != strstr(p->req_body, "${sequence}"));
     }
     p->inited = true;
-    if (NULL == (p->pools = (Pool)malloc(sizeof(struct _pool) * p->tcnt))) {
-	printf("-*-*- Failed to allocate %ld threads.\n", p->tcnt);
-	return -1;
-    }
-    Drop	d;
-    int		i;
-
     p->addr_info = get_addr_info(p->addr, p->port);
     if (!p->keep_alive || 0 < p->meter) {
 	p->backlog = 1;
@@ -628,14 +644,6 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	OpenSSL_add_all_algorithms();
     }
 #endif
-    if (NULL == (p->drops = (Drop)calloc(p->ccnt + 1, sizeof(struct _drop)))) {
-	printf("-*-*- Failed to allocate memory for connections.\n");
-	return -1;
-    }
-    for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
-	// TBD pass in response size after a probe to the target
-	drop_init(d, p);
-    }
     return 0;
 }
 
@@ -645,16 +653,13 @@ perfer_cleanup(Perfer p) {
 	return;
     }
     p->inited = false;
-    Drop	d;
+    Pool	pool;
     int		i;
 
-    for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
-	drop_cleanup(d);
+    for (pool = p->pools, i = p->tcnt; 0 < i; i--, pool++) {
+	pool_cleanup(pool);
     }
-    free(p->xbuf);
-    free(p->drops);
     free(p->addr_info);
-    queue_cleanup(&p->q);
     free(p->pools);
     free(p->req_body);
 }
@@ -812,150 +817,20 @@ json_out(Perfer p, Results r) {
 }
 
 static int
-send_check(Perfer p, Drop d) {
-    int	err;
-
-    if (0 == d->sock) {
-	if (0 != (err = drop_connect(d))) {
-	    // Failed to connect. Abort the test.
-	    perfer_stop(p);
-	    return err;
-	}
-    }
-    if (drop_pending(d) < p->backlog) {
-	int	scnt = send(d->sock, p->req_body, p->req_len, 0);
-
-	if (p->req_len != scnt) {
-	    if (p->keep_alive) {
-		if (!p->json) {
-		    printf("*-*-* error sending request: %s - %d\n", strerror(errno), scnt);
-		}
-		atomic_fetch_add(&p->err_cnt, 1);
-		drop_cleanup(d);
-	    }
-	    return 0;
-	}
-	if (0 == d->start_time) {
-	    d->start_time = ntime();
-	}
-	atomic_fetch_add(&p->sent_cnt, 1);
-
-	int	tail = atomic_load(&d->ptail);
-
-	atomic_store(&d->pipeline[tail], ntime());
-	tail++;
-	if (PIPELINE_SIZE <= tail) {
-	    tail = 0;
-	}
-	atomic_store(&d->ptail, tail);
-    }
-    return 0;
-}
-
-static int
 warmup(Perfer p) {
-    Drop	d;
-    int		i;
-    int		err;
-
-    p->xsize = 0;
     // Initialize connections before starting the benchmarks.
     if (p->keep_alive) {
-	for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
-	    if (0 != (err = drop_connect(d)) ||
-		0 != (err = drop_warmup_send(d))) {
+	Pool	pool;
+	int	i;
+	int	err;
+
+	for (pool = p->pools, i = p->tcnt; 0 < i; pool++, i--) {
+	    if (0 != (err = pool_warmup(pool))) {
 		return err;
 	    }
-	}
-	for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
-	    if (0 != (err = drop_warmup_recv(d))) {
-		return err;
-	    }
-	    if (0 == p->xsize) {
-		p->xsize = d->xsize;
-		p->xbuf = (char*)malloc(p->xsize + 1);
-		memcpy(p->xbuf, d->buf, p->xsize);
-		p->xbuf[p->xsize] = '\0';
-	    } else if (p->xsize != d->xsize) {
-		p->xsize = -1;
-		free(p->xbuf);
-		p->xbuf = NULL;
-	    }
-	    d->xsize = 0;
 	}
     }
     return 0;
-}
-
-static void*
-poll_loop(void *x) {
-    Perfer		p = (Perfer)x;
-    struct pollfd	ps[p->ccnt];
-    struct pollfd	*pp;
-    Drop		d;
-    int			i;
-    int			dcnt = p->ccnt;
-    int			pt = p->poll_timeout;
-
-    while (!p->done) {
-	if (p->enough) {
-	    bool	done = true;
-
-	    for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
-		if (0 < drop_pending(d)) {
-		    done = false;
-		    break;
-		}
-	    }
-	    if (done) {
-		p->done = true;
-		for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
-		    drop_cleanup(d);
-		}
-		break;
-	    }
-	}
-	for (d = p->drops, i = dcnt, pp = ps; 0 < i; i--, d++) {
-	    if (!p->enough && 0 == p->meter) {
-		if (0 != send_check(p, d)) {
-		    return NULL;
-		}
-	    }
-	    if (0 < d->sock) {
-		pp->fd = d->sock;
-		d->pp = pp;
-		pp->events = POLLERR | POLLIN;
-		pp->revents = 0;
-		pp++;
-	    }
-	}
-	if (0 > (i = poll(ps, pp - ps, pt))) {
-	    if (EAGAIN == errno) {
-		continue;
-	    }
-	    printf("*-*-* polling error: %s\n", strerror(errno));
-	    break;
-	}
-	if (0 == i) {
-	    continue;
-	}
-	for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
-	    if (NULL == d->pp || 0 == d->pp->revents || 0 == d->sock) {
-		continue;
-	    }
-	    if (0 != (d->pp->revents & POLLERR)) {
-		atomic_fetch_add(&p->err_cnt, 1);
-		drop_cleanup(d);
-	    }
-	    if (0 != (d->pp->revents & POLLIN)) {
-		if (!atomic_flag_test_and_set(&d->queued)) {
-		    atomic_store(&d->recv_time, ntime());
-		    queue_push(&p->q, d);
-		}
-	    }
-	}
-    }
-    return NULL;
 }
 
 #ifdef HAVE_EPOLL
@@ -1035,36 +910,17 @@ perfer_start(Perfer p) {
     uint64_t		i;
     int			err;
     struct _results	r;
-    pthread_t		poll_thread;
-    struct _pool	pools[p->tcnt];
     Pool		pool;
     Drop		d;
     int			tcnt = 0;
-    bool		use_epoll = p->keep_alive && !p->no_epoll;
 
-#ifndef HAVE_EPOLL
-    use_epoll = false;
-#endif
     memset(&r, 0, sizeof(r));
 
     if (0 != (err = warmup(p))) {
 	return err;
     }
-    if (use_epoll) {
-#ifdef HAVE_EPOLL
-	if (0 != pthread_create(&poll_thread, NULL, epoll_loop, p)) {
-	    printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
-	    return errno;
-	}
-#endif
-    } else {
-	if (0 != pthread_create(&poll_thread, NULL, poll_loop, p)) {
-	    printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
-	    return errno;
-	}
-    }
-    for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
-	if (0 != (err = pool_start(pool, p))) {
+    for (i = p->tcnt, pool = p->pools; 0 < i; i--, pool++) {
+	if (0 != (err = pool_start(pool))) {
 	    printf("*-*-* Failed to create IO threads. %s\n", strerror(err));
 	    perfer_stop(p);
 	    return err;
@@ -1078,10 +934,12 @@ perfer_start(Perfer p) {
 	int64_t	done = ntime() + dur;
 	int64_t	next = ntime();
 	int64_t	now;
+	int	dcnt = p->ccnt / p->tcnt;
 
 	for (now = ntime(); now < done; now = ntime()) {
 	    if (next <= now) {
-		send_check(p, p->drops + (i % p->ccnt));
+		pool = p->pools + (i / dcnt) % p->tcnt;
+		pool_send(pool, i);
 		i++;
 		next += sep;
 	    } else {
@@ -1092,18 +950,21 @@ perfer_start(Perfer p) {
 	dsleep(p->duration + 0.5); // A little extra to give the threads time to startup and connections to be made.
     }
     p->enough = true;
-    for (i = p->tcnt, pool = pools; 0 < i; i--, pool++) {
+    for (i = p->tcnt, pool = p->pools; 0 < i; i--, pool++) {
 	pool_wait(pool);
     }
     if (0 < p->meter) {
 	r.psum = p->duration;
 	tcnt = 1;
     } else {
-	for (d = p->drops, i = p->ccnt; 0 < i; i--, d++) {
-	    if (0 < d->start_time && 0 < d->end_time) {
-		r.psum += (double)(d->end_time - d->start_time) / 1000000000.0;
-		tcnt++;
+	int	j;
 
+	for (i = p->tcnt, pool = p->pools; 0 < i; i--, pool++) {
+	    for (d = pool->drops, j = pool->dcnt; 0 < j; j--, d++) {
+		if (0 < d->start_time && 0 < d->end_time) {
+		    r.psum += (double)(d->end_time - d->start_time) / 1000000000.0;
+		    tcnt++;
+		}
 	    }
 	}
     }

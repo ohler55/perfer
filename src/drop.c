@@ -21,9 +21,10 @@ static const char	content_length[] = "Content-Length:";
 static const char	transfer_encoding[] = "Transfer-Encoding:";
 
 void
-drop_init(Drop d, struct _perfer *perfer) {
+drop_init(Drop d, struct _pool *pool) {
     memset(d, 0, sizeof(struct _drop));
-    d->perfer = perfer;
+    d->pool = pool;
+    d->perfer = pool->perfer;
     atomic_init(&d->recv_time, 0);
 
     atime	*end = d->pipeline + sizeof(d->pipeline) / sizeof(*d->pipeline);
@@ -122,7 +123,8 @@ drop_recv(Drop d) {
     if (0 >= drop_pending(d)) {
 	return 0;
     }
-    Perfer	p = d->perfer;
+    Perfer	pr = d->perfer;
+    Pool	p = d->pool;
     ssize_t	rcnt;
 
     if (0 == d->sock) {
@@ -177,11 +179,11 @@ drop_recv(Drop d) {
 		    long	len = strtol(cl, &end, 10);
 
 		    if ('\r' != *end) {
-			if (!p->json) {
+			if (!d->perfer->json) {
 			    printf("*-*-* error reading content length on %d.\n", d->sock);
 			}
 			drop_cleanup(d);
-			atomic_fetch_add(&p->err_cnt, 1);
+			atomic_fetch_add(&pr->err_cnt, 1);
 			return EIO;
 		    }
 		    d->xsize = hend - d->buf + 4 + len;
@@ -196,14 +198,14 @@ drop_recv(Drop d) {
 	    int64_t	current = atomic_load(&d->pipeline[head]);
 	    int64_t	dt = recv_time - current;
 
-	    atomic_fetch_add(&p->byte_cnt, d->xsize);
+	    atomic_fetch_add(&pr->byte_cnt, d->xsize);
 	    if (0 < current) {
 		if (dt < 0) {
 		    dt = 0;
 		}
 		stagger_add(dt);
 	    } else {
-		atomic_fetch_add(&p->err_cnt, 1);
+		atomic_fetch_add(&pr->err_cnt, 1);
 	    }
 	    d->end_time = recv_time;
 
@@ -212,7 +214,7 @@ drop_recv(Drop d) {
 		head = 0;
 	    }
 	    atomic_store(&d->phead, head);
-	    if ((p->enough || !p->keep_alive) && 0 >= drop_pending(d) ) {
+	    if ((pr->enough || !pr->keep_alive) && 0 >= drop_pending(d) ) {
 		drop_cleanup(d);
 		return 0;
 	    } else {
