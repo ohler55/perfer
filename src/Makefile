@@ -6,7 +6,7 @@ ifeq ($(shell uname -s), Darwin)
 else
 	CV := gnu11
 	CC := gcc
-	EPOLL_DEF := -DHAVE_EPOLLx
+	EPOLL_DEF := -DHAVE_EPOLL
 endif
 
 CFLAGS := -c -Wall -O3 -std=$(CV) -pedantic

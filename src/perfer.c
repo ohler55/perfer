@@ -15,9 +15,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#ifdef HAVE_EPOLL
-#include <sys/epoll.h>
-#endif
+
 #ifdef WITH_OPENSSL
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
@@ -552,7 +550,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	switch (cnt = arg_match(argc, argv, &opt_val, "e", "-no_epoll")) {
+	switch (cnt = arg_match(argc, argv, NULL, "e", "-no_epoll")) {
 	case 0: // no match
 	    break;
 	case 1:
@@ -832,78 +830,6 @@ warmup(Perfer p) {
     }
     return 0;
 }
-
-#ifdef HAVE_EPOLL
-static void*
-epoll_loop(void *x) {
-    Perfer		p = (Perfer)x;
-    struct epoll_event	events[p->ccnt];
-    struct epoll_event	*ep;
-    Drop		d;
-    int			i;
-    int			cnt;
-    int			dcnt = p->ccnt;
-    int			pt = p->poll_timeout;
-    int			efd;
-
-    if (0 > (efd = epoll_create(1))) {
-	printf("*-*-* failed to create epoll: %s\n", strerror(errno));
-	return NULL;
-    }
-    for (d = p->drops, i = dcnt, ep = events; 0 < i; i--, d++) {
-	struct epoll_event	event = {
-	    .events = EPOLLIN,
-	    .data = {
-		.ptr = d,
-	    },
-	};
-	if (0 > epoll_ctl(efd, EPOLL_CTL_ADD, d->sock, &event)) {
-	    printf("*-*-* failed to add epoll: %s\n", strerror(errno));
-	}
-    }
-    while (!p->done) {
-	if (p->enough) {
-	    bool	done = true;
-
-	    for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
-		if (0 < drop_pending(d)) {
-		    done = false;
-		    break;
-		}
-	    }
-	    if (done) {
-		p->done = true;
-		for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
-		    drop_cleanup(d);
-		}
-		break;
-	    }
-	}
-	for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
-	    if (!p->enough && 0 == p->meter) {
-		if (0 != send_check(p, d)) {
-		    return NULL;
-		}
-	    }
-	}
-	if (0 > (cnt = epoll_wait(efd, events, sizeof(events) / sizeof(*events), pt))) {
-	    printf("*-*-* epool wait fails: %s\n", strerror(errno));
-	    perfer_stop(p);
-	    return NULL;
-	}
-	for (ep = events; 0 < cnt; ep++, cnt--) {
-	    d = (Drop)ep->data.ptr;
-	    if (0 != (ep->events & EPOLLIN)) {
-		if (!atomic_flag_test_and_set(&d->queued)) {
-		    atomic_store(&d->recv_time, ntime());
-		    queue_push(&p->q, d);
-		}
-	    }
-	}
-    }
-    return NULL;
-}
-#endif
 
 static int
 perfer_start(Perfer p) {

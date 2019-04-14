@@ -6,6 +6,9 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#ifdef HAVE_EPOLL
+#include <sys/epoll.h>
+#endif
 
 #include "dtime.h"
 #include "drop.h"
@@ -132,6 +135,78 @@ poll_loop(void *x) {
 
     return NULL;
 }
+#ifdef HAVE_EPOLL
+static void*
+epoll_loop(void *x) {
+    Pool		p = (Pool)x;
+    Perfer		pr = p->perfer;
+    int			dcnt = p->dcnt;
+    struct epoll_event	events[dcnt];
+    struct epoll_event	*ep;
+    Drop		d;
+    int			i;
+    int			cnt;
+    int			pt = pr->poll_timeout;
+    int			efd;
+
+    if (0 > (efd = epoll_create(1))) {
+	printf("*-*-* failed to create epoll: %s\n", strerror(errno));
+	return NULL;
+    }
+    for (d = p->drops, i = dcnt, ep = events; 0 < i; i--, d++) {
+	struct epoll_event	event = {
+	    .events = EPOLLIN,
+	    .data = {
+		.ptr = d,
+	    },
+	};
+	if (0 > epoll_ctl(efd, EPOLL_CTL_ADD, d->sock, &event)) {
+	    printf("*-*-* failed to add epoll: %s\n", strerror(errno));
+	}
+    }
+    while (!pr->done) {
+	if (pr->enough) {
+	    bool	done = true;
+
+	    for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
+		if (0 < drop_pending(d)) {
+		    done = false;
+		    break;
+		}
+	    }
+	    if (done) {
+		pr->done = true;
+		for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
+		    drop_cleanup(d);
+		}
+		break;
+	    }
+	}
+	for (d = p->drops, i = dcnt; 0 < i; i--, d++) {
+	    if (!pr->enough && 0 == pr->meter) {
+		if (0 != send_check(pr, d)) {
+		    return NULL;
+		}
+	    }
+	}
+	if (0 > (cnt = epoll_wait(efd, events, sizeof(events) / sizeof(*events), pt))) {
+	    printf("*-*-* epool wait fails: %s\n", strerror(errno));
+	    perfer_stop(pr);
+	    return NULL;
+	}
+	for (ep = events; 0 < cnt; ep++, cnt--) {
+	    d = (Drop)ep->data.ptr;
+	    if (0 != (ep->events & EPOLLIN)) {
+		if (!atomic_flag_test_and_set(&d->queued)) {
+		    atomic_store(&d->recv_time, ntime());
+		    queue_push(&p->q, d);
+		}
+	    }
+	}
+    }
+    return NULL;
+}
+#endif
 
 static void*
 recv_loop(void *x) {
@@ -190,7 +265,7 @@ pool_start(Pool p) {
     dsleep(0.5);
     if (use_epoll) {
 #ifdef HAVE_EPOLL
-	if (0 != pthread_create(&poll_thread, NULL, epoll_loop, p)) {
+	if (0 != pthread_create(&p->poll_thread, NULL, epoll_loop, p)) {
 	    printf("*-*-* Failed to create polling thread. %s\n", strerror(errno));
 	    return errno;
 	}
