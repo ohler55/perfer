@@ -3,4 +3,10 @@
 todo
 ----
 
+- split
+ - move drop arrays into each pool
+ - thread in pool as well
+  - one poller and one rw thread
+ - iterate at end through pool then drop
+
 - TLS

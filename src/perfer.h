@@ -26,8 +26,7 @@ typedef struct _perfer {
     bool		inited;
     volatile bool	done;
     volatile bool	enough;
-    //struct _queue	q;
-    //struct _drop	*drops;
+    volatile bool	go;
 
     struct _pool	*pools;
     long		tcnt;
@@ -53,7 +52,7 @@ typedef struct _perfer {
     bool		replace;
     bool		tls;
     bool		json;
-    bool		no_epoll;
+    bool		use_epoll;
     Header		headers;
     Spread		spread;
 
@@ -61,6 +60,7 @@ typedef struct _perfer {
     atomic_uint_fast64_t	sent_cnt;
     atomic_uint_fast64_t	err_cnt;
     atomic_uint_fast64_t	byte_cnt;
+    atomic_uint_fast8_t		ready_cnt;
 
     pthread_mutex_t		print_mutex;
 } *Perfer;

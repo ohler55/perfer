@@ -34,7 +34,7 @@
 extern int asprintf(char **strp, const char *fmt, ...);
 #endif
 
-#define VERSION	"1.5.2"
+#define VERSION	"1.5.3"
 
 typedef struct _results {
     long	con_cnt;
@@ -51,6 +51,7 @@ typedef struct _results {
 static struct _perfer	perfer = {
     .inited = false,
     .done = false,
+    .go = false,
     .pools = NULL,
     .url = NULL,
     .addr = NULL,
@@ -74,7 +75,7 @@ static struct _perfer	perfer = {
     .replace = false,
     .tls = false,
     .json = false,
-    .no_epoll = false,
+    .use_epoll = false,
     .headers = NULL,
     .spread = NULL,
 };
@@ -134,7 +135,7 @@ static const char	*help_lines[] = {
     NULL
 };
 // hidden option is -z for poll_timeout
-// hidden option is -e for no_epoll
+// hidden option is -e for use_epoll
 
 static void
 help(const char *app_name) {
@@ -298,6 +299,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
     atomic_init(&p->con_cnt, 0);
     atomic_init(&p->err_cnt, 0);
     atomic_init(&p->byte_cnt, 0);
+    atomic_init(&p->ready_cnt, 0);
 
     stagger_init();
 
@@ -550,12 +552,12 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	switch (cnt = arg_match(argc, argv, NULL, "e", "-no_epoll")) {
+	switch (cnt = arg_match(argc, argv, NULL, "e", "-epoll")) {
 	case 0: // no match
 	    break;
 	case 1:
 	case 2:
-	    p->no_epoll = true;
+	    p->use_epoll = true;
 	    continue;
 	    break;
 	default: // match but something went wrong
@@ -839,8 +841,10 @@ perfer_start(Perfer p) {
     Pool		pool;
     Drop		d;
     int			tcnt = 0;
+    double		giveup;
 
     memset(&r, 0, sizeof(r));
+    atomic_store(&p->ready_cnt, 0);
 
     if (0 != (err = warmup(p))) {
 	return err;
@@ -852,9 +856,17 @@ perfer_start(Perfer p) {
 	    return err;
 	}
     }
+    giveup = dtime() + 4.0;
+    while (atomic_load(&p->ready_cnt) < tcnt * 2) {
+	if (giveup <= dtime()) {
+	    printf("*-*-* timed out waiting for threads to start.\n");
+	    perfer_stop(p);
+	    return 1;
+	}
+	dsleep(0.1);
+    }
+    p->go = true;
     if (0 < p->meter) {
-	dsleep(0.5);
-
 	int64_t	dur = (int64_t)(p->duration * 1000000000.0);
 	int64_t	sep = 1000000000ULL / p->meter;
 	int64_t	done = ntime() + dur;
@@ -873,7 +885,7 @@ perfer_start(Perfer p) {
 	    }
 	}
     } else {
-	dsleep(p->duration + 0.5); // A little extra to give the threads time to startup and connections to be made.
+	dsleep(p->duration);
     }
     p->enough = true;
     for (i = p->tcnt, pool = p->pools; 0 < i; i--, pool++) {

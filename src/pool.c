@@ -71,8 +71,18 @@ poll_loop(void *x) {
     Drop		d;
     int			i;
     int			pt = pr->poll_timeout;
+    bool		go = false;
 
+    atomic_fetch_add(&pr->ready_cnt, 1);
     while (!pr->done) {
+	if (!go) {
+	    if (pr->go) {
+		go = true;
+	    } else {
+		dsleep(0.001);
+		continue;
+	    }
+	}
 	if (pr->enough) {
 	    bool	done = true;
 
@@ -148,6 +158,7 @@ epoll_loop(void *x) {
     int			cnt;
     int			pt = pr->poll_timeout;
     int			efd;
+    bool		go = false;
 
     if (0 > (efd = epoll_create(1))) {
 	printf("*-*-* failed to create epoll: %s\n", strerror(errno));
@@ -164,7 +175,16 @@ epoll_loop(void *x) {
 	    printf("*-*-* failed to add epoll: %s\n", strerror(errno));
 	}
     }
+    atomic_fetch_add(&pr->ready_cnt, 1);
     while (!pr->done) {
+	if (!go) {
+	    if (pr->go) {
+		go = true;
+	    } else {
+		dsleep(0.001);
+		continue;
+	    }
+	}
 	if (pr->enough) {
 	    bool	done = true;
 
@@ -214,6 +234,7 @@ recv_loop(void *x) {
     Perfer	pr = p->perfer;
     Drop	d;
 
+    atomic_fetch_add(&pr->ready_cnt, 1);
     while (!pr->done) {
 	if (NULL == (d = queue_pop(&p->q, 0.01))) {
 	    continue;
@@ -253,7 +274,7 @@ pool_init(Pool p, Perfer perfer, int dcnt) {
 
 int
 pool_start(Pool p) {
-    bool	use_epoll = p->perfer->keep_alive && !p->perfer->no_epoll;
+    bool	use_epoll = p->perfer->keep_alive && p->perfer->use_epoll;
 
 #ifndef HAVE_EPOLL
     use_epoll = false;
@@ -289,7 +310,7 @@ pool_wait(Pool p) {
 	double  late = dtime() + p->perfer->duration + 2.0;
 
 	while ((!p->recv_finished || !p->poll_finished) && dtime() < late) {
-	    dsleep(0.5);
+	    dsleep(0.1);
         }
 	pthread_cancel(p->recv_thread);
 	pthread_cancel(p->poll_thread);

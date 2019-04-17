@@ -1,5 +1,11 @@
 # CHANGELOG
 
+### 1.5.3 - 2019-04-17
+
+Faster
+
+- Improved thread use for big performance gain.
+
 ### 1.5.2 - 2019-04-08
 
 Duration bug fix
