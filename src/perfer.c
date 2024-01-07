@@ -390,7 +390,7 @@ perfer_init(Perfer p, int argc, const char **argv) {
 	    help(app_name);
 	    return -1;
 	}
-	switch (cnt = arg_match(argc, argv, &opt_val, "c", "-connection")) {
+	switch (cnt = arg_match(argc, argv, &opt_val, "c", "-connections")) {
 	case 0: // no match
 	    break;
 	case 1:
@@ -801,7 +801,7 @@ json_out(Perfer p, Results r) {
     printf("    \"connections\": %ld,\n", (long)r->con_cnt);
     printf("    \"requests\": %ld,\n", (long)r->ok_cnt);
     printf("    \"requestsPerSecond\": %ld,\n", (long)r->rate);
-    printf("    \"totalBytes\": %ld,\n", r->bytes);
+    printf("    \"totalBytes\": %lld,\n", r->bytes);
     printf("    \"latencyAverageMilliseconds\": %0.3f,\n", stagger_average() / 1000000.0);
     printf("    \"latencyMeanMilliseconds\": %0.3f,\n", stagger_at(0.5) / 1000000.0);
     printf("    \"latencyStdev\": %0.3f%s\n", stagger_stddev() / 1000000.0, NULL != p->spread ? "," : "");

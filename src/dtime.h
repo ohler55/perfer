@@ -10,6 +10,6 @@ extern double	dsleep(double t);
 extern double	dwait(double t);
 extern void	nwait(int64_t nsec);
 
-extern int64_t	ntime();
+extern int64_t	ntime(void);
 
 #endif /* PERFER_DTIME_H */

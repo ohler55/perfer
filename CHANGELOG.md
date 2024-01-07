@@ -1,5 +1,10 @@
 # CHANGELOG
 
+### 1.5.4 - 2024-01-07
+
+- Fixed spelling on the `--connections` option.
+- Updated to eliminate warning with latest compiler.
+
 ### 1.5.3 - 2019-04-17
 
 Faster

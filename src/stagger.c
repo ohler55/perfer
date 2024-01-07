@@ -46,7 +46,7 @@ static struct _stagger	bank = {
 };
 
 void
-stagger_init() {
+stagger_init(void) {
     for (Level level = bank.levels; 0 != level->top; level++) {
 	int	i = SLOT_CNT;
 
@@ -67,7 +67,7 @@ stagger_add(uint64_t val) {
 }
 
 uint64_t
-stagger_count() {
+stagger_count(void) {
     uint64_t	cnt = 0;
 
     for (Level level = bank.levels; 0 != level->top; level++) {
@@ -133,7 +133,7 @@ stagger_range(uint64_t min, uint64_t max) {
 }
 
 uint64_t
-stagger_average() {
+stagger_average(void) {
     uint64_t	cnt = 0;
     double	sum = 0.0;
     uint64_t	scnt;
@@ -156,7 +156,7 @@ stagger_average() {
 }
 
 uint64_t
-stagger_min() {
+stagger_min(void) {
     for (Level level = bank.levels; 0 != level->top; level++) {
 	int		i = 0;
 	uint64_t	scnt;
@@ -171,7 +171,7 @@ stagger_min() {
 }
 
 uint64_t
-stagger_max() {
+stagger_max(void) {
     uint64_t	last = 0;
 
     for (Level level = bank.levels; 0 != level->top; level++) {
@@ -189,7 +189,7 @@ stagger_max() {
 
 // Standard Deviation in nanoseconds.
 double
-stagger_stddev() {
+stagger_stddev(void) {
     uint64_t	cnt = 0;
     double	sum = 0.0;
     uint64_t	scnt;

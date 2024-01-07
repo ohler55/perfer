@@ -14,7 +14,7 @@
 #endif
 
 double
-dtime() {
+dtime(void) {
     struct timespec	ts;
 
     clock_gettime(CLOCK_REALTIME_COURSE, &ts);
@@ -23,7 +23,7 @@ dtime() {
 }
 
 int64_t
-ntime() {
+ntime(void) {
     struct timespec	ts;
 
     clock_gettime(CLOCK_REALTIME_COURSE, &ts);
