@@ -1,5 +1,6 @@
 // Copyright 2016 by Peter Ohler, All Rights Reserved
 
+#define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -150,7 +151,7 @@ drop_recv(Drop d) {
 	    if (0 < p->xsize && 0 == memcmp(p->xbuf, d->buf, p->xsize)) {
 		d->xsize = p->xsize;
 	    } else {
-		char	*cl = strstr(d->buf, content_length);
+		char	*cl = strcasestr(d->buf, content_length);
 		char	*hend;
 
 		if (NULL == cl) {
@@ -162,7 +163,7 @@ drop_recv(Drop d) {
 		    return 0;
 		}
 		if (NULL == cl) {
-		    char	*te = strstr(d->buf, transfer_encoding);
+		    char	*te = strcasestr(d->buf, transfer_encoding);
 
 		    // TBD Handle chunking correctly. This approach only works
 		    // when all the chunks come in one read and no more than that.
@@ -273,7 +274,7 @@ drop_warmup_recv(Drop d) {
 	d->rcnt += rcnt;
 	if (0 < d->rcnt) {
 	    if (0 >= d->xsize) {
-		char	*cl = strstr(d->buf, content_length);
+		char	*cl = strcasestr(d->buf, content_length);
 		char	*hend;
 
 		if (NULL == cl) {
@@ -285,7 +286,7 @@ drop_warmup_recv(Drop d) {
 		    return 0;
 		}
 		if (NULL == cl) {
-		    char	*te = strstr(d->buf, transfer_encoding);
+		    char	*te = strcasestr(d->buf, transfer_encoding);
 
 		    // TBD Handle chunking correctly. This approach only works
 		    // when all the chunks come in one read and no more than that.
