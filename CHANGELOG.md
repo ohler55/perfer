@@ -1,5 +1,9 @@
 # CHANGELOG
 
+### 1.5.5 - 2026-05-02
+
+- Headers fields are now case insensitive thanks to @andrew-woblavobla.
+
 ### 1.5.4 - 2024-01-07
 
 - Fixed spelling on the `--connections` option.
